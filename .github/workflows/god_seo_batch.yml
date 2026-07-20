@@ -49,9 +49,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: rank_reports/batch_progress.json
-          key: batch-progress-${{ github.run_number }}
+          key: batch-progress-${{ github.event.inputs.mode }}-${{ github.run_number }}
           restore-keys: |
-            batch-progress-
+            batch-progress-${{ github.event.inputs.mode }}-
 
       - name: Create rank_reports directory
         run: mkdir -p rank_reports src
@@ -88,7 +88,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: rank_reports/batch_progress.json
-          key: batch-progress-${{ github.run_number }}
+          key: batch-progress-${{ github.event.inputs.mode }}-${{ github.run_number }}
 
       - name: Upload logs and reports
         uses: actions/upload-artifact@v4
