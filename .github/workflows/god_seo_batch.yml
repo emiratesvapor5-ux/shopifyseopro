@@ -9,11 +9,13 @@ on:
         default: "test-1"
         type: choice
         options:
-          - "test-1"       # Run 1 product only (verify quality)
-          - "chunk-1"      # Products 1–62
-          - "chunk-2"      # Products 63–124
-          - "chunk-3"      # Products 125–186
-          - "chunk-4"      # Products 187–246
+          - "test-1"       # Run 1 product only (fresh, ignores cache)
+          - "chunk-1"      # Products  1–41  (~3.5 hrs)
+          - "chunk-2"      # Products 42–82  (~3.5 hrs)
+          - "chunk-3"      # Products 83–123 (~3.5 hrs)
+          - "chunk-4"      # Products 124–164 (~3.5 hrs)
+          - "chunk-5"      # Products 165–205 (~3.5 hrs)
+          - "chunk-6"      # Products 206–246 (~3.5 hrs)
       vendor:
         description: "Filter by vendor (optional, e.g. 'GeekVape')"
         required: false
@@ -22,7 +24,9 @@ on:
 jobs:
   god-seo:
     runs-on: ubuntu-latest
-    timeout-minutes: 340
+    # 5 hours per job — each chunk is ~41 products × 5 min = 205 min max.
+    # 300 min ceiling gives a 95-min safety buffer even if some products are slow.
+    timeout-minutes: 300
 
     env:
       SHOPIFY_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
@@ -39,7 +43,9 @@ jobs:
       - name: Install dependencies
         run: pip install -q requests
 
-      - name: Restore progress cache
+      # Only restore progress cache for chunk runs — test-1 always starts fresh
+      - name: Restore progress cache (chunk runs only)
+        if: startsWith(github.event.inputs.mode, 'chunk-')
         uses: actions/cache@v4
         with:
           path: rank_reports/batch_progress.json
@@ -55,13 +61,16 @@ jobs:
         run: |
           MODE="${{ github.event.inputs.mode }}"
           VENDOR="${{ github.event.inputs.vendor }}"
-          CMD="python3 -u src/batch_god_seo.py --resume"
+
           if [ "$MODE" = "test-1" ]; then
-            CMD="$CMD --limit 1"
+            # test-1: always fresh (no --resume), run exactly 1 product
+            CMD="python3 -u src/batch_god_seo.py --limit 1"
           else
+            # chunk-N: resume from cache, run the Nth slice of 41 products
             CHUNK="${MODE#chunk-}"
-            CMD="$CMD --chunk $CHUNK"
+            CMD="python3 -u src/batch_god_seo.py --resume --chunk $CHUNK"
           fi
+
           if [ -n "$VENDOR" ]; then
             CMD="$CMD --vendor \"$VENDOR\""
           fi
@@ -72,6 +81,14 @@ jobs:
         run: ${{ steps.cmd.outputs.cmd }}
         env:
           PYTHONUNBUFFERED: "1"
+
+      # Save progress so the next chunk can resume from exactly where this one stopped
+      - name: Save progress cache (chunk runs only)
+        if: startsWith(github.event.inputs.mode, 'chunk-') && always()
+        uses: actions/cache/save@v4
+        with:
+          path: rank_reports/batch_progress.json
+          key: batch-progress-${{ github.run_number }}
 
       - name: Upload logs and reports
         uses: actions/upload-artifact@v4
