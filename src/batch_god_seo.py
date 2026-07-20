@@ -12,8 +12,25 @@ DOMAIN  = 'https://emiratesvapor.ae'
 REPORTS = os.path.join(os.path.dirname(__file__), '..', 'rank_reports')
 PROGRESS_FILE = os.path.join(REPORTS, 'batch_progress.json')
 
-# Products already GOD-SEO'd (body_backups = ground truth)
+# Products already GOD-SEO'd (Shopify product IDs from pre-batch manual runs)
 DONE_IDS = {8242398986314, 8242439422026, 8242493915210, 8247941988426, 8247942152266, 8247941890122}
+
+# Handles successfully GOD-SEO'd in the July 20 batch run (13 confirmed)
+DONE_HANDLES = {
+    "18650-battery-best-vape-shop-dubai-2026",
+    "al-fakher-crown-bar-15000-al-fakher-vape-best-vape-shop-dubai-2026",
+    "al-fakher-crown-bar-40000",
+    "best-buy-uwell-caliburn-g2-empty-pod-cartridge-in-uae",
+    "buy-new-strawberry-kiwi-nasty-modmate-60ml-freebase",
+    "buy-online-voopoo-vinci-pod-cartridge-2ml",
+    "buy-vaporesso-gtx-replacement-coils-in-uae",
+    "buy-voopoo-drag-x-pnp-x-pod-kit-80w-in-uae",
+    "crown-bar-al-fakher-15000",
+    "cush-man-e-liquid-by-nasty-juice-60ml-in-uae",
+    "cush-man-mango-grape-by-nasty-60ml-e-liquid-in-uae",
+    "geek-ap2-best-vape-shop-dubai-2026",
+    "geekvape-aegis-au-pod-kit-in-uae",
+}
 
 def load_progress():
     if os.path.exists(PROGRESS_FILE):
@@ -38,7 +55,7 @@ def get_all_products(vendor_filter=None):
         if not pi: break
 
     # Filter out already done
-    remaining = [p for p in prods if p['id'] not in DONE_IDS]
+    remaining = [p for p in prods if p['id'] not in DONE_IDS and p['handle'] not in DONE_HANDLES]
 
     if vendor_filter:
         remaining = [p for p in remaining if vendor_filter.lower() in p.get('vendor','').lower()]
@@ -62,7 +79,7 @@ def run_god(prod, progress, log_fh):
     log_fh.flush()
 
     god_py = os.path.join(os.path.dirname(__file__), 'god_seo_engine.py')
-    cmd = [sys.executable, '-u', god_py, url, '--no-ai', '--no-backlinks']
+    cmd = [sys.executable, '-u', god_py, url, '--no-ai', '--no-backlinks', '--fast']
 
     try:
         result = subprocess.run(
