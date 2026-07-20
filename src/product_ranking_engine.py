@@ -40,9 +40,16 @@ INDEXNOW_ENDPOINTS = [
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _api_get(path, params=None):
-    r = requests.get(f"{SHOPIFY_BASE}/{path}", headers=SHG, params=params, timeout=20)
+    for attempt in range(4):
+        r = requests.get(f"{SHOPIFY_BASE}/{path}", headers=SHG, params=params, timeout=20)
+        if r.status_code == 429:
+            wait = int(float(r.headers.get('Retry-After', '10'))) + 1
+            print(f"  Shopify 429 — retrying in {wait}s (attempt {attempt+1}/4)...")
+            time.sleep(min(wait, 30))
+            continue
+        r.raise_for_status()
+        return r.json()
     r.raise_for_status()
-    return r.json()
 
 def _api_put(path, data):
     r = requests.put(f"{SHOPIFY_BASE}/{path}", headers=SH, json=data, timeout=25)
