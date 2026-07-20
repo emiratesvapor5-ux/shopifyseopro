@@ -3,14 +3,19 @@ name: GOD SEO Batch Runner
 on:
   workflow_dispatch:
     inputs:
-      chunk:
-        description: "Chunk number (1=products 1-60, 2=61-120, 3=121-180, 4=181-246)"
+      mode:
+        description: "Mode"
         required: true
-        default: "1"
+        default: "test-1"
         type: choice
-        options: ["1", "2", "3", "4"]
+        options:
+          - "test-1"       # Run 1 product only (verify quality)
+          - "chunk-1"      # Products 1–62
+          - "chunk-2"      # Products 63–124
+          - "chunk-3"      # Products 125–186
+          - "chunk-4"      # Products 187–246
       vendor:
-        description: "Filter by vendor (leave empty for all)"
+        description: "Filter by vendor (optional, e.g. 'GeekVape')"
         required: false
         default: ""
 
@@ -21,8 +26,6 @@ jobs:
 
     env:
       SHOPIFY_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
-      SHOPIFY_SHOP: emirates-vapor.myshopify.com
-      STORE_DOMAIN: emiratesvapor.ae
 
     steps:
       - name: Checkout
@@ -36,7 +39,7 @@ jobs:
       - name: Install dependencies
         run: pip install -q requests
 
-      - name: Download progress from previous runs
+      - name: Restore progress cache
         uses: actions/cache@v4
         with:
           path: rank_reports/batch_progress.json
@@ -45,22 +48,36 @@ jobs:
             batch-progress-
 
       - name: Create rank_reports directory
-        run: mkdir -p rank_reports
+        run: mkdir -p rank_reports src
 
-      - name: Run GOD SEO batch (chunk ${{ github.event.inputs.chunk }})
+      - name: Build run command
+        id: cmd
         run: |
-          python3 -u src/batch_god_seo.py \
-            --chunk ${{ github.event.inputs.chunk }} \
-            --resume \
-            ${{ github.event.inputs.vendor != '' && format('--vendor "{0}"', github.event.inputs.vendor) || '' }}
+          MODE="${{ github.event.inputs.mode }}"
+          VENDOR="${{ github.event.inputs.vendor }}"
+          CMD="python3 -u src/batch_god_seo.py --resume"
+          if [ "$MODE" = "test-1" ]; then
+            CMD="$CMD --limit 1"
+          else
+            CHUNK="${MODE#chunk-}"
+            CMD="$CMD --chunk $CHUNK"
+          fi
+          if [ -n "$VENDOR" ]; then
+            CMD="$CMD --vendor \"$VENDOR\""
+          fi
+          echo "cmd=$CMD" >> $GITHUB_OUTPUT
+          echo "Running: $CMD"
+
+      - name: Run GOD SEO
+        run: ${{ steps.cmd.outputs.cmd }}
         env:
           PYTHONUNBUFFERED: "1"
 
-      - name: Upload logs and progress
+      - name: Upload logs and reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: seo-batch-chunk-${{ github.event.inputs.chunk }}-logs
+          name: god-seo-${{ github.event.inputs.mode }}-${{ github.run_number }}
           path: |
             rank_reports/batch_god_run.log
             rank_reports/batch_progress.json
