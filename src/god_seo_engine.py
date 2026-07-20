@@ -877,7 +877,7 @@ def clean_product_url(prod, focus):
 
 
 def god_rank(url, dry=False, use_ai=True, ping=True, backlinks=True, package=None,
-            focus_override=None, clean_url=False):
+            focus_override=None, clean_url=False, fast=False):
     os.makedirs(REPORTS, exist_ok=True)
     t0 = time.time()
     print("=" * 65)
@@ -887,11 +887,26 @@ def god_rank(url, dry=False, use_ai=True, ping=True, backlinks=True, package=Non
 
     prod = q.analyze_product(url)
     seeds = q.build_seeds(prod)
-    found = q.mine_keywords(seeds)
 
-    # Quick pre-scan to pick focus, then deep blueprint on the focus keyword itself
-    competitors = q.analyze_competitors([f"{seeds[0]} uae", f"buy {seeds[0]}"])
-    focus, secondary, scored = q.score_keywords(found, prod, competitors)
+    if fast:
+        # Skip all external web scraping — use product data alone for keyword/blueprint
+        found = {}
+        competitors = []
+        print("[2/8] Fast mode — skipping keyword mining (no web scraping)")
+        print("[3/8] Fast mode — skipping competitor analysis")
+        focus, secondary, scored = q.score_keywords(found, prod, competitors)
+        blueprint = {"focus": focus, "target_word_count": 2000, "h2_topics_to_cover": [],
+                     "schema_types_used": [], "kw_density_target": 1.0,
+                     "faq_adoption_pct": 0, "title_pattern": "", "pages": []}
+        bp_pages = []
+    else:
+        found = q.mine_keywords(seeds)
+        # Quick pre-scan to pick focus, then deep blueprint on the focus keyword itself
+        competitors = q.analyze_competitors([f"{seeds[0]} uae", f"buy {seeds[0]}"])
+        focus, secondary, scored = q.score_keywords(found, prod, competitors)
+        blueprint, bp_pages = build_ranking_blueprint(
+            [focus, f"buy {focus} uae", f"{focus} dubai"], focus, prod)
+
     if focus_override:
         # A human (or the writer feeding --package) chose a more specific/relevant
         # keyword than the mechanical top score — e.g. an exact product-model match
@@ -904,8 +919,6 @@ def god_rank(url, dry=False, use_ai=True, ping=True, backlinks=True, package=Non
         print(f"  🎯 Focus overridden → \"{focus}\" (mechanical top pick demoted to secondary)")
     if clean_url and not dry and prod["platform"] == "shopify":
         prod = clean_product_url(prod, focus)
-    blueprint, bp_pages = build_ranking_blueprint(
-        [focus, f"buy {focus} uae", f"{focus} dubai"], focus, prod)
 
     dossier = {
         "product": {k: prod[k] for k in ("name", "brand", "type", "price_aed", "url", "tags")},
@@ -1018,7 +1031,8 @@ def main():
              backlinks="--no-backlinks" not in args,
              package=package,
              focus_override=focus_override,
-             clean_url="--clean-url" in args)
+             clean_url="--clean-url" in args,
+             fast="--fast" in args)
 
 
 if __name__ == "__main__":
