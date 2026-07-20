@@ -654,7 +654,9 @@ def generate_template(prod, focus, secondary):
     brand = prod["brand"] or "this brand"
     # For SEO title / meta only: strip keyword-stuffing junk merchants add to Shopify titles
     # e.g. "Crown Bar 15000 AL FAKHER Vape Best Vape Shop (2026) UAE" → "Crown Bar 15000"
-    seo_name = core_product_name(name, brand if brand != "this brand" else "")
+    _raw_seo = core_product_name(name, brand if brand != "this brand" else "")
+    # Strip leading "Buy " if merchant stuffed it into the Shopify title (we prefix "Buy" ourselves)
+    seo_name = re.sub(r'^Buy\s+', '', _raw_seo, flags=re.I).strip()
     brand_slug = slugify(prod["brand"]) if prod["brand"] else ""
     price = prod["price_aed"]
     ptype = detect_product_type(prod)
@@ -1006,11 +1008,36 @@ def _spec_row(k, v):
     return f"<tr><td {td}><strong>{k}</strong></td><td {td}>{v}</td></tr>"
 
 
-def render_body(gen, prod, schema_html, focus=""):
+def render_body(gen, prod, schema_html, focus="", collections=None, hub=None, flavors_handle=None):
     name, brand, price = gen["product_title"], prod["brand"], prod["price_aed"]
     nvar = len(prod["variants"])
     nums = [t for t in prod["name"].split() if t.isdigit()]
     vlabel, vlabel_s = variant_label(prod), variant_label(prod, singular=True)
+
+    # ── Notice banner — single API write, always top of description ──────────────
+    banner = (f'<div style="background:#111;color:#fff;padding:13px 20px;border-radius:8px;'
+              f'margin-bottom:16px;font-weight:700;font-size:14px;text-align:center;'
+              f'letter-spacing:.3px;border:1px solid rgba(255,255,255,.12)">'
+              f'⚡ AED {price} — UAE\'s BEST PRICE &nbsp;|&nbsp; '
+              f'🚀 1–3 HR DUBAI DELIVERY &nbsp;|&nbsp; '
+              f'✅ 100% AUTHENTIC {(brand or STORE_NAME).upper()} &nbsp;|&nbsp; ALL FLAVORS IN STOCK'
+              f'</div>')
+
+    # Quick links strip (only rendered when there's something to link to)
+    ql_parts = []
+    for h in (collections or []):
+        label = h.replace("-", " ").title()
+        ql_parts.append(f'<a href="/collections/{h}" {_LINK}>Shop {label}</a>')
+    if flavors_handle:
+        ql_parts.append(f'<a href="/pages/{flavors_handle}" {_LINK}>All {vlabel}</a>')
+    if hub:
+        ql_parts.append(f'<a href="/pages/{hub}" {_LINK}>{brand} Brand Guide</a>')
+    quick_links = ""
+    if ql_parts:
+        quick_links = (f'<div style="background:#f8f9fa;border:1px solid #e2e8f0;'
+                       f'border-radius:8px;padding:10px 16px;margin-bottom:20px;font-size:13px">'
+                       f'<strong>Quick Links:</strong> &nbsp;'
+                       + " &nbsp;|&nbsp; ".join(ql_parts) + "</div>")
 
     # Quick stat badge grid (black + orange hero cards, grey support cards)
     if nums:
@@ -1084,12 +1111,13 @@ def render_body(gen, prod, schema_html, focus=""):
                   f'<a href="https://vaporshopdubai.ae" {_LINK} rel="noopener" '
                   f'target="_blank">VaporShop Dubai</a>'])) + "</div>")
 
-    return (f"{QS}\n<div class=\"qseo-content\">\n{badge_grid}\n{intro}\n{pre_html}\n"
-            f"{spec_acc}\n" + "\n".join(accs) + f"\n{faq_acc}\n{browse}\n</div>\n"
-            f"{schema_html}\n{QE}")
+    return (f"{QS}\n{banner}\n{quick_links}<div class=\"qseo-content\">\n{badge_grid}\n"
+            f"{intro}\n{pre_html}\n{spec_acc}\n" + "\n".join(accs) +
+            f"\n{faq_acc}\n{browse}\n</div>\n{schema_html}\n{QE}")
 
 
-def apply_body_content(product_id, gen, schema_html, prod, focus=""):
+def apply_body_content(product_id, gen, schema_html, prod, focus="",
+                       collections=None, hub=None, flavors_handle=None):
     old = pre._api_get(f"products/{product_id}.json?fields=body_html")["product"]["body_html"] or ""
     bdir = os.path.join(REPORTS, "body_backups")
     os.makedirs(bdir, exist_ok=True)
@@ -1097,13 +1125,14 @@ def apply_body_content(product_id, gen, schema_html, prod, focus=""):
     if old.strip() and not os.path.exists(bfile):
         with open(bfile, "w") as f:
             f.write(old)  # first-touch backup of the original description
-    # FULL REPLACE — one clean copy, VooPoo-reference design, zero duplication
-    body = render_body(gen, prod, schema_html, focus)
+    # FULL REPLACE — one clean copy, banner + badge grid + specs + accordions + FAQPage schema
+    body = render_body(gen, prod, schema_html, focus,
+                       collections=collections, hub=hub, flavors_handle=flavors_handle)
     pre._api_put(f"products/{product_id}.json",
                  {"product": {"id": product_id, "body_html": body}})
     words = len(re.sub(r"<[^>]+>", " ", gen["html_content"]).split())
-    print(f"  Body REPLACED — badge grid + specs + accordions + {len(gen['faq'])} FAQ "
-          f"({words} words, VooPoo-reference design) ✅")
+    print(f"  Body REPLACED — notice banner + badge grid + specs + {len(gen['faq'])} FAQs "
+          f"({words} words) ✅")
 
 
 def apply_image_alts(product_id, alts, prod):
@@ -1218,17 +1247,20 @@ def apply_onpage(prod, gen, focus):
                 f"{vlabel_s.lower()} guide</a>.</p>")
             print(f"  {vlabel} list auto-injected ({len(titles)} variants, real names) ✅")
 
+    # Resolve collections + hub BEFORE body write so banner + quick-links are
+    # included in the single apply_body_content() API call — eliminates the old
+    # step3_notice_banner() second-write that was silently failing on some products.
+    collections = find_existing_collections(prod["brand"])
+    hub = find_brand_hub(prod["brand"])
+
     flavors_handle = None
     if len(prod["variants"]) > 1:
         flavors_handle = flavors_page_v2(prod, gen, focus)
 
     schema_html = build_schema_scripts(prod, gen, focus)
-    apply_body_content(pid, gen, schema_html, prod, focus)
+    apply_body_content(pid, gen, schema_html, prod, focus,
+                       collections=collections, hub=hub, flavors_handle=flavors_handle)
 
-    collections = find_existing_collections(prod["brand"])
-    hub = find_brand_hub(prod["brand"])
-    pre.step3_notice_banner(pid, prod["price_aed"], "1–3 HR DUBAI DELIVERY", collections,
-                            prod["brand"] or STORE_NAME, flavors_handle, hub)
     return collections, flavors_handle, hub
 
 
