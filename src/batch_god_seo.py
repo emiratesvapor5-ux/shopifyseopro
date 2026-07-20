@@ -129,13 +129,13 @@ def main():
     prods = get_all_products(vendor_filter)
     progress = load_progress() if resume else {"done": [], "failed": [], "skipped": []}
 
-    # Chunk: split 246 products into 4 chunks of ~60 each
+    # Chunk: split products into 6 chunks of ~41 each (~3.5 hrs/chunk, well under 6hr GH limit)
     if chunk:
-        chunk_size = 62
+        chunk_size = 41
         start = (chunk - 1) * chunk_size
         end   = start + chunk_size
         prods = prods[start:end]
-        print(f"  Chunk {chunk}: products {start+1}–{min(end, start+len(prods)+1)}")
+        print(f"  Chunk {chunk}: products {start+1}–{start+len(prods)}")
 
     # Limit: test mode — process only N products
     if limit:
