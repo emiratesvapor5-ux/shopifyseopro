@@ -128,6 +128,24 @@ def clean_title(t):
     return t.strip()
 
 
+def core_product_name(name, brand=""):
+    """Extract the clean brand + model from a keyword-stuffed Shopify product title.
+    e.g. 'AL FAKHER Crown Bar 15000 AL FAKHER Vape Best Vape Shop (2026) UAE'
+         → 'AL FAKHER Crown Bar 15000'"""
+    t = name or ""
+    # Strip year markers and SEO junk appended after the model
+    t = re.sub(r"(?i)\s*[\(\[]?\s*202[3-9]\s*[\)\]]?\s*", " ", t)
+    t = re.sub(r"(?i)\b(best\s+vape\s+shop|vape\s+shop|best\s+price|online\s+store|"
+               r"buy\s+now|in\s+uae|in\s+dubai|uae|dubai|lowest\s+price)\b.*", "", t)
+    # Remove a repeated brand mention after the model number (e.g. "...15000 AL FAKHER Vape...")
+    if brand:
+        # Allow the brand once at the start; kill any second occurrence
+        escaped = re.escape(brand)
+        t = re.sub(rf"(?i)({escaped}\s+.{{1,60}}?)\s+{escaped}\b.*", r"\1", t)
+    t = re.sub(r"\s+", " ", t).strip(" -,|")
+    return t or name
+
+
 # ── [1/8] PRODUCT ANALYSIS ────────────────────────────────────────────────────
 
 def analyze_product(url):
@@ -634,6 +652,9 @@ def generate_template(prod, focus, secondary):
     print("\n[5/8] Generating content (built-in zero-API template)...")
     name = prod["name"]
     brand = prod["brand"] or "this brand"
+    # For SEO title / meta only: strip keyword-stuffing junk merchants add to Shopify titles
+    # e.g. "Crown Bar 15000 AL FAKHER Vape Best Vape Shop (2026) UAE" → "Crown Bar 15000"
+    seo_name = core_product_name(name, brand if brand != "this brand" else "")
     brand_slug = slugify(prod["brand"]) if prod["brand"] else ""
     price = prod["price_aed"]
     ptype = detect_product_type(prod)
@@ -759,9 +780,9 @@ def generate_template(prod, focus, secondary):
             f"{name} at AED {price} — 100% authentic {brand}, ESMA-certified. "
             + (f"{len(variants)} {vlabel.lower()} in stock. " if variants else "")
             + "Same-day 1–3 hour Dubai delivery, cash on delivery across all 7 Emirates.", 300),
-        "seo_title": trim(f"Buy {name} UAE | AED {price} | Emirates Vapor", 60),
+        "seo_title": trim(f"Buy {seo_name} UAE | AED {price} | Emirates Vapor", 60),
         "meta_description": trim(
-            f"Buy {name} UAE for AED {price}. "
+            f"Buy {seo_name} in UAE for AED {price}. "
             + (f"{len(variants)} {vlabel.lower()} available. " if variants else "")
             + f"Same-day delivery Dubai 1–3 hours. 100% authentic {brand}, ESMA-certified. "
             "Cash on delivery UAE-wide.", 158),
