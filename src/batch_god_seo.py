@@ -104,12 +104,16 @@ def main():
     resume = '--resume' in args
     vendor_filter = None
     chunk = None
+    limit = None
     if '--vendor' in args:
         i = args.index('--vendor')
         vendor_filter = args[i + 1] if i + 1 < len(args) else None
     if '--chunk' in args:
         i = args.index('--chunk')
         chunk = int(args[i + 1]) if i + 1 < len(args) else None
+    if '--limit' in args:
+        i = args.index('--limit')
+        limit = int(args[i + 1]) if i + 1 < len(args) else 1
 
     # Support SHOPIFY_TOKEN env var (for GitHub Actions secrets)
     import os as _os
@@ -132,6 +136,11 @@ def main():
         end   = start + chunk_size
         prods = prods[start:end]
         print(f"  Chunk {chunk}: products {start+1}–{min(end, start+len(prods)+1)}")
+
+    # Limit: test mode — process only N products
+    if limit:
+        prods = prods[:limit]
+        print(f"  LIMIT MODE: running only first {limit} product(s)")
 
     # Sort: named brands first, Emirates Vapor (juices) last
     PRIORITY = ['GeekVape','Elfbar','NASTY','AL FAKHER','Aspire','FUMMO','Uwell',
