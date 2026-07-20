@@ -655,8 +655,8 @@ def generate_template(prod, focus, secondary):
     # For SEO title / meta only: strip keyword-stuffing junk merchants add to Shopify titles
     # e.g. "Crown Bar 15000 AL FAKHER Vape Best Vape Shop (2026) UAE" → "Crown Bar 15000"
     _raw_seo = core_product_name(name, brand if brand != "this brand" else "")
-    # Strip leading "Buy " if merchant stuffed it into the Shopify title (we prefix "Buy" ourselves)
-    seo_name = re.sub(r'^Buy\s+', '', _raw_seo, flags=re.I).strip()
+    # Strip leading merchant-added prefixes ("Buy", "Best Buy") — we add "Buy" ourselves
+    seo_name = re.sub(r'^(?:Buy\s+)?(?:Best\s+Buy\s+)?', '', _raw_seo, flags=re.I).strip()
     brand_slug = slugify(prod["brand"]) if prod["brand"] else ""
     price = prod["price_aed"]
     ptype = detect_product_type(prod)
@@ -782,9 +782,9 @@ def generate_template(prod, focus, secondary):
             f"{name} at AED {price} — 100% authentic {brand}, ESMA-certified. "
             + (f"{len(variants)} {vlabel.lower()} in stock. " if variants else "")
             + "Same-day 1–3 hour Dubai delivery, cash on delivery across all 7 Emirates.", 300),
-        "seo_title": trim(f"Buy {seo_name} UAE | AED {price} | Emirates Vapor", 60),
+        "seo_title": trim(f"Buy {seo_name} UAE | {'AED ' + str(price) + ' | ' if price else ''}Emirates Vapor", 60),
         "meta_description": trim(
-            f"Buy {seo_name} in UAE for AED {price}. "
+            f"Buy {seo_name} in UAE" + (f" for AED {price}" if price else "") + ". "
             + (f"{len(variants)} {vlabel.lower()} available. " if variants else "")
             + f"Same-day delivery Dubai 1–3 hours. 100% authentic {brand}, ESMA-certified. "
             "Cash on delivery UAE-wide.", 158),
