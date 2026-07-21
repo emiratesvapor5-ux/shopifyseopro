@@ -1,0 +1,78 @@
+name: GOD SEO Phase 2 — Keyword Mining + AI Content
+
+on:
+  workflow_dispatch:
+    inputs:
+      chunk:
+        description: "Chunk to run (1-6, or all)"
+        required: true
+        default: "all"
+        type: choice
+        options: ["all","1","2","3","4","5","6"]
+
+jobs:
+  god-seo-phase2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        chunk: [1, 2, 3, 4, 5, 6]
+
+    env:
+      SHOPIFY_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
+
+    steps:
+      - name: Skip if single-chunk mode and not selected
+        if: github.event.inputs.chunk != 'all' && github.event.inputs.chunk != matrix.chunk
+        run: |
+          echo "Skipping chunk ${{ matrix.chunk }} (only running ${{ github.event.inputs.chunk }})"
+          exit 0
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -q requests
+
+      - name: Restore Phase 2 progress cache
+        uses: actions/cache@v4
+        with:
+          path: rank_reports/batch_progress.json
+          key: p2-progress-chunk-${{ matrix.chunk }}-${{ github.run_number }}
+          restore-keys: |
+            p2-progress-chunk-${{ matrix.chunk }}-
+
+      - name: Create rank_reports directory
+        run: mkdir -p rank_reports
+
+      - name: Run Phase 2 GOD SEO
+        run: |
+          python3 -u src/batch_god_seo.py --resume --chunk ${{ matrix.chunk }} --phase 2
+        env:
+          PYTHONUNBUFFERED: "1"
+
+      - name: Save Phase 2 progress cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: rank_reports/batch_progress.json
+          key: p2-progress-chunk-${{ matrix.chunk }}-${{ github.run_number }}
+
+      - name: Upload Phase 2 logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2-chunk-${{ matrix.chunk }}-run${{ github.run_number }}
+          path: |
+            rank_reports/batch_god_run.log
+            rank_reports/batch_progress.json
+          retention-days: 30
+
