@@ -128,24 +128,6 @@ def clean_title(t):
     return t.strip()
 
 
-def core_product_name(name, brand=""):
-    """Extract the clean brand + model from a keyword-stuffed Shopify product title.
-    e.g. 'AL FAKHER Crown Bar 15000 AL FAKHER Vape Best Vape Shop (2026) UAE'
-         → 'AL FAKHER Crown Bar 15000'"""
-    t = name or ""
-    # Strip year markers and SEO junk appended after the model
-    t = re.sub(r"(?i)\s*[\(\[]?\s*202[3-9]\s*[\)\]]?\s*", " ", t)
-    t = re.sub(r"(?i)\b(best\s+vape\s+shop|vape\s+shop|best\s+price|online\s+store|"
-               r"buy\s+now|in\s+uae|in\s+dubai|uae|dubai|lowest\s+price)\b.*", "", t)
-    # Remove a repeated brand mention after the model number (e.g. "...15000 AL FAKHER Vape...")
-    if brand:
-        # Allow the brand once at the start; kill any second occurrence
-        escaped = re.escape(brand)
-        t = re.sub(rf"(?i)({escaped}\s+.{{1,60}}?)\s+{escaped}\b.*", r"\1", t)
-    t = re.sub(r"\s+", " ", t).strip(" -,|")
-    return t or name
-
-
 # ── [1/8] PRODUCT ANALYSIS ────────────────────────────────────────────────────
 
 def analyze_product(url):
@@ -507,6 +489,15 @@ def _content_prompt(dossier):
         "- Weave in these USPs: " + "; ".join(USPS) + "\n"
         "- Beat the competitor pages in the dossier on depth and clarity; never name competitors\n"
         "- Include a quick-facts table and a flavors/variants section if variants exist\n"
+        "- Include a competitor comparison table (H2: '[Product] vs Other Vapes in UAE — How It Compares') "
+        "with columns: Device | Puffs | Coil | Modes | Price UAE | Delivery. "
+        "Put current product first (highlighted with 'IN STOCK' badge), then 2 generic category rows "
+        "('Standard High-Cap Disposable (UAE avg.)' etc.) — NEVER name specific competitor products\n"
+        "- If product has special coil tech (mesh/tri-mesh/dual-mesh) or multiple modes "
+        "(blade mode/stealth mode/eco mode), include a dedicated H2 section explaining that "
+        "tech in plain buyer-facing language — this targets high-intent long-tail searches\n"
+        "- Include a 'Where to Buy [Product] in Dubai UAE' H2 section listing delivery times, "
+        "cash-on-delivery, and authenticity guarantee\n"
         "- FAQ questions should match real 'People also ask' style queries from the keyword list\n"
         "- Answer-first: open every H2 section with a direct 40-60 word answer (snippet-ready)\n"
         "- Include a 'Key Facts' bullet list of quotable standalone stats (price, capacity, "
@@ -628,23 +619,28 @@ def build_faq_list(prod, focus, vlabel):
     n = len(prod["variants"])
     faqs = [
         (f"Is the {name} authentic?",
-         f"Yes — 100% authentic, sourced directly from authorized {brand} distributors in the UAE."),
+         f"Yes. Every {focus} product we sell, including the {name}, is 100% authentic and "
+         f"sourced directly from authorized {brand} distributors."),
         (f"Is the {name} legal in the UAE?",
-         "Yes, ESMA-compliant and fully legal to purchase and use anywhere in the UAE."),
-        (f"How much does the {name} cost?",
-         f"AED {price} at {STORE_NAME} — one of the most competitive prices for {focus} online."),
-        (f"How fast is delivery to Dubai?",
-         f"Dubai: 1–3 hours. Abu Dhabi, Sharjah, Ajman, and all other Emirates: next-day delivery."),
-        (f"Can I pay cash on delivery?",
+         "Yes, this product is ESMA-compliant and fully legal to purchase and use in the UAE."),
+        (f"How much does the {name} cost in the UAE?",
+         f"The {name} is priced at AED {price} at {STORE_NAME} — one of the most competitive "
+         f"prices for {focus} in the UAE."),
+        (f"How fast is delivery for the {name} in Dubai?",
+         f"{STORE_NAME} delivers the {name} in Dubai within 1–3 hours. Abu Dhabi, Sharjah, Ajman "
+         f"and the other Emirates receive next-day delivery."),
+        (f"Can I pay cash on delivery for the {name}?",
          "Yes, cash on delivery is available UAE-wide, along with card payment."),
-        (f"What is the return policy?",
-         "Standard return policy covers unopened, unused products. Contact support for details."),
-        (f"Where can I buy {focus} online in the UAE?",
-         f"Order at {STORE_NAME} — same-day Dubai delivery in 1–3 hours, no need to visit a shop."),
+        (f"Can I return the {name} if I'm not satisfied?",
+         "Yes, we offer a standard return policy on unopened, unused products. Contact support "
+         "for details."),
+        (f"Where can I buy the {name} near me in the UAE?",
+         f"Order online at {STORE_NAME} — Dubai orders typically arrive faster than visiting a "
+         f"physical vape shop, with 1–3 hour delivery."),
     ]
     if n > 1:
         faqs.insert(2, (f"How many {vlabel.lower()} does the {name} come in?",
-                        f"{n} {vlabel.lower()} in stock at {STORE_NAME}, all at AED {price}."))
+                        f"{n} {vlabel.lower()} are in stock at {STORE_NAME}, all at AED {price} each."))
     return faqs
 
 
@@ -652,15 +648,25 @@ def generate_template(prod, focus, secondary):
     print("\n[5/8] Generating content (built-in zero-API template)...")
     name = prod["name"]
     brand = prod["brand"] or "this brand"
-    # For SEO title / meta only: strip keyword-stuffing junk merchants add to Shopify titles
-    # e.g. "Crown Bar 15000 AL FAKHER Vape Best Vape Shop (2026) UAE" → "Crown Bar 15000"
-    _raw_seo = core_product_name(name, brand if brand != "this brand" else "")
-    # Strip leading merchant-added prefixes ("Buy", "Best Buy") — we add "Buy" ourselves
-    seo_name = re.sub(r'^(?:Buy\s+)?(?:Best\s+Buy\s+)?', '', _raw_seo, flags=re.I).strip()
     brand_slug = slugify(prod["brand"]) if prod["brand"] else ""
     price = prod["price_aed"]
     ptype = detect_product_type(prod)
     specs = extract_real_specs(prod)
+    # Detect advanced tech signals from existing product description (no fabrication)
+    _body_low = (prod.get("body_text", "") or "").lower()
+    _coil_tech = None
+    if re.search(r'tri.?mesh', _body_low): _coil_tech = "Tri-Mesh"
+    elif re.search(r'dual.?mesh', _body_low): _coil_tech = "Dual-Mesh"
+    elif re.search(r'honeycomb', _body_low): _coil_tech = "Honeycomb"
+    elif re.search(r'mesh\s*coil', _body_low): _coil_tech = "Mesh"
+    _mode_names = []
+    for _mpat in [r'blade\s*mode', r'stealth\s*mode', r'eco\s*mode', r'turbo\s*mode',
+                  r'boost\s*mode', r'power\s*mode', r'smooth\s*mode', r'normal\s*mode']:
+        _mm = re.search(_mpat, _body_low)
+        if _mm: _mode_names.append(_mm.group(0).title())
+    _mode_cnt_m = re.search(r'(\d+)\s*(?:vaping\s*)?modes?\b', _body_low)
+    _mode_count = int(_mode_cnt_m.group(1)) if _mode_cnt_m else len(_mode_names)
+    _has_airflow = bool(re.search(r'adj\w*\s*airflow|airflow\s*adj\w*', _body_low))
     variants = [v["title"] for v in prod["variants"]]
     vlabel, vlabel_s = variant_label(prod), variant_label(prod, singular=True)
     fk = focus.title()
@@ -715,6 +721,47 @@ def generate_template(prod, focus, secondary):
             features.append(("Adjustable Ice Control",
                              f"{name} lets you adjust the cooling intensity yourself, rather "
                              f"than being stuck with one fixed level like ordinary disposables."))
+        if _coil_tech:
+            _coil_map = {
+                "Tri-Mesh": ("Tri-Mesh Coil — Why It Delivers Better Flavour",
+                             f"The {name} uses a tri-mesh coil — three parallel mesh heating elements working together. "
+                             f"Compared to a standard single coil, the tri-mesh design heats more e-liquid at once, "
+                             f"producing denser vapor, richer flavour, and more consistent output from the first puff to the last."),
+                "Dual-Mesh": ("Dual-Mesh Coil Technology",
+                              f"The {name} features a dual-mesh coil — two parallel mesh elements for a wider heating surface "
+                              f"than a single coil. The result: more even heat distribution, better flavour saturation, "
+                              f"and fewer dry hits as puff count climbs."),
+                "Honeycomb": ("Honeycomb Mesh Coil",
+                              f"The {name} uses a honeycomb mesh coil with a hexagonal cell pattern that maximises the "
+                              f"active heating area — delivering intense, cloud-heavy vapor and strong flavour extraction from every puff."),
+                "Mesh": ("Mesh Coil — Better Than Wire",
+                         f"The {name} uses a mesh coil rather than a traditional wire coil. The flat mesh surface heats "
+                         f"more e-liquid at once, producing more vapor per puff and cleaner flavour without metallic notes."),
+            }
+            if _coil_tech in _coil_map:
+                features.append(_coil_map[_coil_tech])
+        if _mode_count > 1 or len(_mode_names) >= 2:
+            if any(n in " ".join(_mode_names).lower() for n in ["blade", "stealth"]):
+                features.append((
+                    "Blade Mode vs Stealth Mode — Two Experiences in One Device",
+                    f"Most disposables lock you into a single output — the {name} doesn't. "
+                    f"Blade Mode maximises vapor output and flavour intensity for full sessions. "
+                    f"Stealth Mode runs at lower power for a quieter draw and extended battery life. "
+                    f"Switch between them instantly — no menus, no app required."
+                ))
+            else:
+                features.append((
+                    f"{_mode_count}-Mode Vaping — Built-In Flexibility",
+                    f"Unlike fixed-output disposables, the {name} includes {_mode_count} vaping modes. "
+                    f"Switch between higher output for intense sessions and a lower setting for extended use — "
+                    f"all with a single button press. Two experiences in one device."
+                ))
+        if _has_airflow:
+            features.append((
+                "Adjustable Airflow — Dial In Your Draw",
+                f"The {name} lets you control airflow directly on the device. Tighten it for a "
+                f"cigarette-like MTL draw, or open it up for a looser DTL experience — without switching devices."
+            ))
         pros = [f"100% Authentic {brand} — sourced from an authorized UAE distributor",
                 "ESMA compliant — legal to purchase and use in UAE"]
         if specs.get("Puff Count"):
@@ -741,6 +788,48 @@ def generate_template(prod, focus, secondary):
         spec_rows += f"<tr><td><strong>{vlabel}</strong></td><td>{len(variants)} available</td></tr>"
     parts.append(f"<h2>Quick Facts</h2><table>{spec_rows}</table>")
 
+    if ptype == "disposable":
+        _puff_str = specs.get("Puff Count", "")
+        _puff_num = 0
+        if _puff_str:
+            _pm = re.search(r'[\d,]+', _puff_str)
+            if _pm: _puff_num = int(_pm.group(0).replace(',', ''))
+        if _puff_num >= 30000:
+            _t2 = ("Standard High-Cap Disposable (UAE avg.)", "15,000–25,000 Puffs")
+            _t3 = ("Mid-Range Disposable (UAE avg.)", "6,000–12,000 Puffs")
+        elif _puff_num >= 10000:
+            _t2 = ("Standard Disposable (UAE avg.)", "5,000–8,000 Puffs")
+            _t3 = ("Budget Disposable (UAE avg.)", "2,000–4,000 Puffs")
+        else:
+            _t2 = ("Standard Disposable (UAE avg.)", "2,000–4,000 Puffs")
+            _t3 = ("Budget Disposable (UAE avg.)", "800–1,500 Puffs")
+        _coil_d = (_coil_tech + " Coil") if _coil_tech else "Premium Coil"
+        _modes_d = f"{_mode_count} Modes" if _mode_count > 1 else "Standard"
+        TH = 'style="background:#111;color:#fff;padding:10px 14px;text-align:left;font-size:.82rem;font-weight:700"'
+        TD = 'style="padding:9px 14px;border-bottom:1px solid #e5e7eb;font-size:.85rem;vertical-align:top"'
+        _cmp_html = (
+            f'<tr style="background:#f0fdf4">'
+            f'<td {TD}><strong>{name}</strong> <span style="background:#166534;color:#fff;font-size:.7rem;padding:2px 7px;border-radius:10px;margin-left:5px">IN STOCK</span></td>'
+            f'<td {TD}><strong>{_puff_str or "High Capacity"}</strong></td>'
+            f'<td {TD}><strong>{_coil_d}</strong></td>'
+            f'<td {TD}><strong>{_modes_d}</strong></td>'
+            f'<td {TD}><strong>AED {price}</strong></td>'
+            f'<td {TD}><strong>1–3 hrs Dubai</strong></td>'
+            f'</tr>'
+            f'<tr><td {TD}>{_t2[0]}</td><td {TD}>{_t2[1]}</td><td {TD}>Dual-Coil</td>'
+            f'<td {TD}>1 Mode</td><td {TD}>AED varies</td><td {TD}>Next-day</td></tr>'
+            f'<tr><td {TD}>{_t3[0]}</td><td {TD}>{_t3[1]}</td><td {TD}>Single Coil</td>'
+            f'<td {TD}>1 Mode</td><td {TD}>AED varies</td><td {TD}>1–3 days</td></tr>'
+        )
+        parts.append(
+            f'<h2>{name} vs Other Disposable Vapes — How It Compares</h2>'
+            f'<div style="overflow-x:auto;margin:16px 0">'
+            f'<table style="width:100%;border-collapse:collapse;min-width:520px">'
+            f'<thead><tr><th {TH}>Device</th><th {TH}>Puffs</th><th {TH}>Coil</th>'
+            f'<th {TH}>Modes</th><th {TH}>Price UAE</th><th {TH}>Delivery</th></tr></thead>'
+            f'<tbody>{_cmp_html}</tbody></table></div>'
+        )
+
     if features:
         feat_html = "".join(f"<h3>{t}</h3><p>{b}</p>" for t, b in features)
         parts.append(f"<h2>Key Features</h2>{feat_html}")
@@ -762,6 +851,21 @@ def generate_template(prod, focus, secondary):
           f'<a href="https://vaporshopdubai.ae" {ls} target="_blank" rel="noopener">'
           f"VaporShop Dubai</a> for more options.</li></ul>")
 
+    parts.append(
+        f"<h2>Where to Buy {name} in Dubai UAE</h2>"
+        f'<p>The <strong>{name}</strong> is available at <a href="/" {ls}>{STORE_NAME}</a> '
+        f'for <strong>AED {price}</strong>. '
+        f'All <a href="{coll}" {ls}>{brand} vapes in UAE</a> ship same-day. '
+        f"Order before 9PM for 1–3 hour Dubai delivery, or next-day to Abu Dhabi, Sharjah, "
+        f"and all 7 Emirates.</p>"
+        f"<ul>"
+        f"<li><strong>Dubai delivery:</strong> 1–3 hours — order before 9PM</li>"
+        f"<li><strong>All 7 Emirates:</strong> next-day delivery available</li>"
+        f"<li><strong>Cash on delivery:</strong> pay when your order arrives</li>"
+        f"<li><strong>100% authentic:</strong> sourced from authorized UAE distributors</li>"
+        f"<li><strong>ESMA certified:</strong> fully legal to purchase in the UAE</li>"
+        f"</ul>")
+
     final = (f"If you're looking for the best {focus} in the UAE, the {name} is a strong "
             f"choice — authentic {brand} build quality, ESMA-compliant, at AED {price} with "
             f"same-day Dubai delivery. Order now from {STORE_NAME}.")
@@ -782,12 +886,11 @@ def generate_template(prod, focus, secondary):
             f"{name} at AED {price} — 100% authentic {brand}, ESMA-certified. "
             + (f"{len(variants)} {vlabel.lower()} in stock. " if variants else "")
             + "Same-day 1–3 hour Dubai delivery, cash on delivery across all 7 Emirates.", 300),
-        "seo_title": trim(f"Buy {seo_name} UAE | {'AED ' + str(price) + ' | ' if price else ''}Emirates Vapor", 60),
+        "seo_title": trim(f"Buy {name} UAE | AED {price} | Same-Day Dubai | Emirates Vapor", 60),
         "meta_description": trim(
-            f"Buy {seo_name} in UAE" + (f" for AED {price}" if price else "") + ". "
-            + (f"{len(variants)} {vlabel.lower()} available. " if variants else "")
-            + f"Same-day delivery Dubai 1–3 hours. 100% authentic {brand}, ESMA-certified. "
-            "Cash on delivery UAE-wide.", 158),
+            f"Buy {name} in UAE for AED {price}. "
+            + (f"{len(variants)} {vlabel.lower()} in stock. " if variants else "")
+            + "Same-day delivery Dubai 1-3 hours. 100% authentic, ESMA-certified, cash on delivery.", 158),
         "html_content": "\n".join(parts),
         "faq": faq, "image_alts": alts, "internal_link_texts": [],
     }
@@ -863,8 +966,10 @@ def build_schema_scripts(prod, gen, focus):
             "shippingDestination": {"@type": "DefinedRegion",
                 "addressCountry": "AE"},
             "deliveryTime": {"@type": "ShippingDeliveryTime",
+                "handlingTime": {"@type": "QuantitativeValue", "minValue": 0, "maxValue": 1,
+                                 "unitCode": "DAY"},
                 "transitTime": {"@type": "QuantitativeValue", "minValue": 1, "maxValue": 3,
-                                "unitCode": "HUR"}}},
+                                "unitCode": "DAY"}}},
     }
     offers = ([dict(offer_base, name=f"{name} {v['title']}", url=f"{url}?variant={v['id']}")
                for v in prod["variants"]] or [dict(offer_base, name=name, url=url)])
@@ -890,13 +995,25 @@ def build_schema_scripts(prod, gen, focus):
               "potentialAction": {"@type": "SearchAction",
                   "target": f"https://{prod['domain']}/search?q={{search_term_string}}",
                   "query-input": "required name=search_term_string"}}
-    # Shopify theme auto-generates Product + BreadcrumbList schemas. Injecting duplicates
-    # caused 4x Product / 4x BreadcrumbList schemas on the live page, which Google ignores
-    # (no rich snippets). We only inject FAQPage — unique to us, not generated by the theme,
-    # and the only one that unlocks FAQ rich results in SERPs.
-    # AggregateRating will be added via product metafields (reviews namespace) once real
-    # review data is in place, so the theme's Product schema picks it up natively.
-    schemas = [faq]
+    org = {"@context": "https://schema.org", "@type": "Organization",
+           "name": STORE_NAME, "url": f"https://{prod['domain']}/",
+           "description": "UAE online vape retailer — 100% authentic products, ESMA-certified, "
+                          "same-day delivery across Dubai and all 7 Emirates.",
+           "areaServed": {"@type": "Country", "name": "UAE"}}
+    schemas = [product, faq, crumbs, website, org]
+    if len(prod["variants"]) > 1:
+        pg = {"@context": "https://schema.org", "@type": "ProductGroup",
+              "name": name, "url": url,
+              "brand": {"@type": "Brand", "name": brand or STORE_NAME},
+              "hasVariant": [{"@type": "Product",
+                              "name": f"{name} {v['title']}",
+                              "sku": f"{slugify(brand or 'ev').upper()}-{slugify(v['title'])[:20].upper()}",
+                              "offers": {"@type": "Offer", "price": str(price),
+                                         "priceCurrency": "AED",
+                                         "availability": "https://schema.org/InStock",
+                                         "url": f"{url}?variant={v['id']}"}}
+                             for v in prod["variants"]]}
+        schemas.append(pg)
     if STORE_ENTITY["street_address"] and STORE_ENTITY["phone"]:
         addr = {"@type": "PostalAddress", "streetAddress": STORE_ENTITY["street_address"],
                "addressLocality": STORE_ENTITY["locality"],
@@ -1008,36 +1125,11 @@ def _spec_row(k, v):
     return f"<tr><td {td}><strong>{k}</strong></td><td {td}>{v}</td></tr>"
 
 
-def render_body(gen, prod, schema_html, focus="", collections=None, hub=None, flavors_handle=None):
+def render_body(gen, prod, schema_html, focus=""):
     name, brand, price = gen["product_title"], prod["brand"], prod["price_aed"]
     nvar = len(prod["variants"])
     nums = [t for t in prod["name"].split() if t.isdigit()]
     vlabel, vlabel_s = variant_label(prod), variant_label(prod, singular=True)
-
-    # ── Notice banner — single API write, always top of description ──────────────
-    banner = (f'<div style="background:#111;color:#fff;padding:13px 20px;border-radius:8px;'
-              f'margin-bottom:16px;font-weight:700;font-size:14px;text-align:center;'
-              f'letter-spacing:.3px;border:1px solid rgba(255,255,255,.12)">'
-              f'⚡ AED {price} — UAE\'s BEST PRICE &nbsp;|&nbsp; '
-              f'🚀 1–3 HR DUBAI DELIVERY &nbsp;|&nbsp; '
-              f'✅ 100% AUTHENTIC {(brand or STORE_NAME).upper()} &nbsp;|&nbsp; ALL FLAVORS IN STOCK'
-              f'</div>')
-
-    # Quick links strip (only rendered when there's something to link to)
-    ql_parts = []
-    for h in (collections or []):
-        label = h.replace("-", " ").title()
-        ql_parts.append(f'<a href="/collections/{h}" {_LINK}>Shop {label}</a>')
-    if flavors_handle:
-        ql_parts.append(f'<a href="/pages/{flavors_handle}" {_LINK}>All {vlabel}</a>')
-    if hub:
-        ql_parts.append(f'<a href="/pages/{hub}" {_LINK}>{brand} Brand Guide</a>')
-    quick_links = ""
-    if ql_parts:
-        quick_links = (f'<div style="background:#f8f9fa;border:1px solid #e2e8f0;'
-                       f'border-radius:8px;padding:10px 16px;margin-bottom:20px;font-size:13px">'
-                       f'<strong>Quick Links:</strong> &nbsp;'
-                       + " &nbsp;|&nbsp; ".join(ql_parts) + "</div>")
 
     # Quick stat badge grid (black + orange hero cards, grey support cards)
     if nums:
@@ -1111,13 +1203,12 @@ def render_body(gen, prod, schema_html, focus="", collections=None, hub=None, fl
                   f'<a href="https://vaporshopdubai.ae" {_LINK} rel="noopener" '
                   f'target="_blank">VaporShop Dubai</a>'])) + "</div>")
 
-    return (f"{QS}\n{banner}\n{quick_links}<div class=\"qseo-content\">\n{badge_grid}\n"
-            f"{intro}\n{pre_html}\n{spec_acc}\n" + "\n".join(accs) +
-            f"\n{faq_acc}\n{browse}\n</div>\n{schema_html}\n{QE}")
+    return (f"{QS}\n<div class=\"qseo-content\">\n{badge_grid}\n{intro}\n{pre_html}\n"
+            f"{spec_acc}\n" + "\n".join(accs) + f"\n{faq_acc}\n{browse}\n</div>\n"
+            f"{schema_html}\n{QE}")
 
 
-def apply_body_content(product_id, gen, schema_html, prod, focus="",
-                       collections=None, hub=None, flavors_handle=None):
+def apply_body_content(product_id, gen, schema_html, prod, focus=""):
     old = pre._api_get(f"products/{product_id}.json?fields=body_html")["product"]["body_html"] or ""
     bdir = os.path.join(REPORTS, "body_backups")
     os.makedirs(bdir, exist_ok=True)
@@ -1125,14 +1216,13 @@ def apply_body_content(product_id, gen, schema_html, prod, focus="",
     if old.strip() and not os.path.exists(bfile):
         with open(bfile, "w") as f:
             f.write(old)  # first-touch backup of the original description
-    # FULL REPLACE — one clean copy, banner + badge grid + specs + accordions + FAQPage schema
-    body = render_body(gen, prod, schema_html, focus,
-                       collections=collections, hub=hub, flavors_handle=flavors_handle)
+    # FULL REPLACE — one clean copy, VooPoo-reference design, zero duplication
+    body = render_body(gen, prod, schema_html, focus)
     pre._api_put(f"products/{product_id}.json",
                  {"product": {"id": product_id, "body_html": body}})
     words = len(re.sub(r"<[^>]+>", " ", gen["html_content"]).split())
-    print(f"  Body REPLACED — notice banner + badge grid + specs + {len(gen['faq'])} FAQs "
-          f"({words} words) ✅")
+    print(f"  Body REPLACED — badge grid + specs + accordions + {len(gen['faq'])} FAQ "
+          f"({words} words, VooPoo-reference design) ✅")
 
 
 def apply_image_alts(product_id, alts, prod):
@@ -1247,20 +1337,17 @@ def apply_onpage(prod, gen, focus):
                 f"{vlabel_s.lower()} guide</a>.</p>")
             print(f"  {vlabel} list auto-injected ({len(titles)} variants, real names) ✅")
 
-    # Resolve collections + hub BEFORE body write so banner + quick-links are
-    # included in the single apply_body_content() API call — eliminates the old
-    # step3_notice_banner() second-write that was silently failing on some products.
-    collections = find_existing_collections(prod["brand"])
-    hub = find_brand_hub(prod["brand"])
-
     flavors_handle = None
     if len(prod["variants"]) > 1:
         flavors_handle = flavors_page_v2(prod, gen, focus)
 
     schema_html = build_schema_scripts(prod, gen, focus)
-    apply_body_content(pid, gen, schema_html, prod, focus,
-                       collections=collections, hub=hub, flavors_handle=flavors_handle)
+    apply_body_content(pid, gen, schema_html, prod, focus)
 
+    collections = find_existing_collections(prod["brand"])
+    hub = find_brand_hub(prod["brand"])
+    pre.step3_notice_banner(pid, prod["price_aed"], "1–3 HR DUBAI DELIVERY", collections,
+                            prod["brand"] or STORE_NAME, flavors_handle, hub)
     return collections, flavors_handle, hub
 
 
