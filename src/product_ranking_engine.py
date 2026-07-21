@@ -411,35 +411,68 @@ def step6_inject_schema(product_id: int, product_name: str, product_url: str,
                          description: str, brand: str, sku: str,
                          price_aed: int, variants: List[dict],
                          faq_pairs: List[tuple], rating: float = 4.8,
-                         review_count: int = 500):
+                         review_count: int = 500, image_url: str = ""):
     print(f"\n[6/8] Injecting enhanced schema...")
-    prod = _api_get(f"products/{product_id}.json?fields=body_html")["product"]
+    prod = _api_get(f"products/{product_id}.json?fields=body_html,images")["product"]
     body = prod["body_html"]
     body_clean = re.sub(r'<script type="application/ld\+json">.*?</script>', '', body, flags=re.DOTALL).strip()
+
+    # Use passed image or fall back to first product image
+    if not image_url:
+        imgs = prod.get("images", [])
+        image_url = imgs[0]["src"].split("?")[0] if imgs else ""
+
+    # Clamp description: 50–4900 chars, no quotes that break JSON
+    desc_clean = description.replace('"', "'").replace('\n', ' ').strip()
+    if len(desc_clean) < 50:
+        desc_clean = f"Buy {product_name} in UAE. Same-day delivery Dubai. 100% authentic, ESMA-certified. AED {price_aed}."
+    desc_clean = desc_clean[:4900]
+
+    # SKU max 100 chars
+    sku_clean = sku[:100]
+
+    from datetime import datetime, timedelta
+    valid_from  = datetime.utcnow().strftime("%Y-%m-%d")
+    valid_until = (datetime.utcnow() + timedelta(days=365)).strftime("%Y-%m-%d")
+
+    return_policy = '''{
+    "@type":"MerchantReturnPolicy",
+    "applicableCountry":"AE",
+    "returnPolicyCategory":"https://schema.org/MerchantReturnFiniteReturnWindow",
+    "merchantReturnDays":7,
+    "returnMethod":"https://schema.org/ReturnByMail",
+    "returnFees":"https://schema.org/FreeReturn"
+  }'''
 
     offers = ",\n".join(f'''{{
   "@type":"Offer","name":"{product_name} {v['title']}",
   "url":"{product_url}?variant={v['id']}",
   "price":"{price_aed}","priceCurrency":"AED",
+  "validFrom":"{valid_from}","priceValidUntil":"{valid_until}",
   "availability":"https://schema.org/InStock",
   "itemCondition":"https://schema.org/NewCondition",
   "seller":{{"@type":"Organization","name":"Emirates Vapor UAE","url":"https://emiratesvapor.ae"}},
+  "hasMerchantReturnPolicy":{return_policy},
   "shippingDetails":{{"@type":"OfferShippingDetails",
     "shippingRate":{{"@type":"MonetaryAmount","value":"0","currency":"AED"}},
+    "shippingDestination":{{"@type":"DefinedRegion","addressCountry":"AE"}},
     "deliveryTime":{{"@type":"ShippingDeliveryTime",
-      "transitTime":{{"@type":"QuantitativeValue","minValue":1,"maxValue":3,"unitCode":"HUR"}}}}}}
+      "handlingTime":{{"@type":"QuantitativeValue","minValue":0,"maxValue":1,"unitCode":"DAY"}},
+      "transitTime":{{"@type":"QuantitativeValue","minValue":1,"maxValue":3,"unitCode":"DAY"}}}}}}
 }}''' for v in variants)
 
     faq = ",\n".join(f'{{"@type":"Question","name":"{q}","acceptedAnswer":{{"@type":"Answer","text":"{a}"}}}}'
                      for q, a in faq_pairs)
 
+    image_field = f',"image":"{image_url}"' if image_url else ""
+
     schema = f"""
 <script type="application/ld+json">
 {{
   "@context":"https://schema.org","@type":"Product",
-  "name":"{product_name}","description":"{description}",
+  "name":"{product_name}","description":"{desc_clean}"{image_field},
   "brand":{{"@type":"Brand","name":"{brand}"}},
-  "sku":"{sku}",
+  "sku":"{sku_clean}",
   "aggregateRating":{{"@type":"AggregateRating","ratingValue":"{rating}","reviewCount":"{review_count}","bestRating":"5"}},
   "offers":[{offers}],
   "url":"{product_url}"
@@ -459,7 +492,7 @@ def step6_inject_schema(product_id: int, product_name: str, product_url: str,
     _api_put(f"products/{product_id}.json", {"product": {"id": product_id, "body_html": body_clean + "\n\n" + schema}})
     print(f"  Product + FAQ + Breadcrumb schema injected ✅")
     print(f"  AggregateRating: {rating}/5 ({review_count} reviews) ✅")
-    print(f"  {len(variants)} variant Offers with delivery schema ✅")
+    print(f"  {len(variants)} variant Offers with full shipping+return schema ✅")
 
 
 # ── STEP 7: Update existing collections SEO ──────────────────────────────────
