@@ -1,0 +1,87 @@
+name: GOD SEO Nightly Batch (12AM-8AM UAE)
+
+on:
+  schedule:
+    # 12:00 AM UAE (UTC+4) = 20:00 UTC — main nightly run
+    - cron: '0 20 * * *'
+    # 04:00 AM UAE (UTC+4) = 00:00 UTC — cleanup pass for any failures
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Mode"
+        required: true
+        default: "all-chunks"
+        type: choice
+        options:
+          - "all-chunks"    # Run all 6 chunks (nightly)
+          - "test-1"        # Test: 1 product only
+
+jobs:
+  god-seo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240  # 4hr ceiling per chunk; each chunk ~100min at 1s/API call
+
+    strategy:
+      # 2 at a time = 2 API calls/sec total — under Shopify's 2/sec rate limit
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        chunk: [1, 2, 3, 4, 5, 6]
+
+    env:
+      SHOPIFY_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -q requests
+
+      - name: Restore progress cache (chunk-specific)
+        uses: actions/cache@v4
+        with:
+          path: rank_reports/batch_progress.json
+          key: nightly-progress-chunk-${{ matrix.chunk }}-${{ github.run_number }}
+          restore-keys: |
+            nightly-progress-chunk-${{ matrix.chunk }}-
+
+      - name: Create rank_reports directory
+        run: mkdir -p rank_reports src
+
+      - name: Run GOD SEO chunk
+        run: |
+          if [ "${{ github.event.inputs.mode }}" = "test-1" ] && [ "${{ matrix.chunk }}" != "1" ]; then
+            echo "Test mode: only chunk-1 runs, skipping chunk-${{ matrix.chunk }}"
+            exit 0
+          fi
+          if [ "${{ github.event.inputs.mode }}" = "test-1" ]; then
+            python3 -u src/batch_god_seo.py --limit 1
+          else
+            python3 -u src/batch_god_seo.py --resume --chunk ${{ matrix.chunk }}
+          fi
+        env:
+          PYTHONUNBUFFERED: "1"
+
+      - name: Save progress cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: rank_reports/batch_progress.json
+          key: nightly-progress-chunk-${{ matrix.chunk }}-${{ github.run_number }}
+
+      - name: Upload logs and progress
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-chunk-${{ matrix.chunk }}-run${{ github.run_number }}
+          path: |
+            rank_reports/batch_god_run.log
+            rank_reports/batch_progress.json
+          retention-days: 7
