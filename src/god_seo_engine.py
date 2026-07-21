@@ -877,7 +877,7 @@ def clean_product_url(prod, focus):
 
 
 def god_rank(url, dry=False, use_ai=True, ping=True, backlinks=True, package=None,
-            focus_override=None, clean_url=False, fast=False):
+            focus_override=None, clean_url=False, fast=False, no_blueprint=False):
     os.makedirs(REPORTS, exist_ok=True)
     t0 = time.time()
     print("=" * 65)
@@ -889,7 +889,7 @@ def god_rank(url, dry=False, use_ai=True, ping=True, backlinks=True, package=Non
     seeds = q.build_seeds(prod)
 
     if fast:
-        # Skip all external web scraping — use product data alone for keyword/blueprint
+        # Phase 1: Skip all external web scraping — use product data alone
         found = {}
         competitors = []
         print("[2/8] Fast mode — skipping keyword mining (no web scraping)")
@@ -898,6 +898,18 @@ def god_rank(url, dry=False, use_ai=True, ping=True, backlinks=True, package=Non
         blueprint = {"focus": focus, "target_word_count": 2000, "h2_topics_to_cover": [],
                      "schema_types_used": [], "kw_density_target": 1.0,
                      "faq_adoption_pct": 0, "title_pattern": "", "pages": []}
+        bp_pages = []
+    elif no_blueprint:
+        # Phase 2: Mine real keywords (autocomplete APIs) but skip heavy SERP scraping
+        print("[2/8] Phase 2 — mining keywords via Google/Bing/DDG autocomplete...")
+        found = q.mine_keywords(seeds)
+        competitors = []
+        focus, secondary, scored = q.score_keywords(found, prod, competitors)
+        print(f"  Focus keyword: {focus} | Secondary: {', '.join(secondary[:3])}")
+        print("[3/8] Phase 2 — skipping SERP blueprint (no competitor page fetching)")
+        blueprint = {"focus": focus, "target_word_count": 2000, "h2_topics_to_cover": [],
+                     "schema_types_used": [], "kw_density_target": 1.0,
+                     "faq_adoption_pct": 100, "title_pattern": "", "pages": []}
         bp_pages = []
     else:
         found = q.mine_keywords(seeds)
@@ -1032,8 +1044,10 @@ def main():
              package=package,
              focus_override=focus_override,
              clean_url="--clean-url" in args,
-             fast="--fast" in args)
+             fast="--fast" in args,
+             no_blueprint="--no-blueprint" in args)
 
 
 if __name__ == "__main__":
     main()
+
