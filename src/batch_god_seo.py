@@ -244,7 +244,7 @@ def get_all_products(vendor_filter=None):
 
     return remaining
 
-def run_god(prod, progress, log_fh):
+def run_god(prod, progress, log_fh, phase=1):
     handle = prod['handle']
     url    = f"{DOMAIN}/products/{handle}"
 
@@ -260,14 +260,19 @@ def run_god(prod, progress, log_fh):
     log_fh.flush()
 
     god_py = os.path.join(os.path.dirname(__file__), 'god_seo_engine.py')
-    cmd = [sys.executable, '-u', god_py, url, '--no-ai', '--no-backlinks', '--fast']
+    if phase == 2:
+        # Phase 2: real keyword mining via autocomplete APIs + AI content, no SERP scraping
+        cmd = [sys.executable, '-u', god_py, url, '--no-blueprint', '--no-backlinks']
+    else:
+        # Phase 1: template-only fast pass — get all products covered quickly
+        cmd = [sys.executable, '-u', god_py, url, '--no-ai', '--no-backlinks', '--fast']
 
     try:
         result = subprocess.run(
             cmd,
             capture_output=False,
             text=True,
-            timeout=300,
+            timeout=300 if phase == 1 else 540,  # Phase 2: 9 min for keyword mining + AI
             cwd=os.path.join(os.path.dirname(__file__), '..'),
         )
         if result.returncode == 0:
@@ -303,6 +308,7 @@ def main():
     vendor_filter = None
     chunk = None
     limit = None
+    phase = 1
     if '--vendor' in args:
         i = args.index('--vendor')
         vendor_filter = args[i + 1] if i + 1 < len(args) else None
@@ -312,6 +318,9 @@ def main():
     if '--limit' in args:
         i = args.index('--limit')
         limit = int(args[i + 1]) if i + 1 < len(args) else 1
+    if '--phase' in args:
+        i = args.index('--phase')
+        phase = int(args[i + 1]) if i + 1 < len(args) else 1
 
     env_token = os.environ.get('SHOPIFY_TOKEN')
     if env_token:
@@ -319,7 +328,8 @@ def main():
         TOKEN = env_token
 
     print("⚡ BATCH GOD SEO ENGINE")
-    print(f"  Resume: {resume}  |  Vendor filter: {vendor_filter or 'ALL'}  |  Chunk: {chunk or 'ALL'}")
+    mode_label = "Phase 2 — Keyword Mining + AI" if phase == 2 else "Phase 1 — Fast Coverage"
+    print(f"  Mode: {mode_label}  |  Resume: {resume}  |  Vendor: {vendor_filter or 'ALL'}  |  Chunk: {chunk or 'ALL'}")
     print("  Fetching products...")
 
     prods = get_all_products(vendor_filter)
@@ -367,7 +377,7 @@ def main():
 
         for i, prod in enumerate(prods, 1):
             print(f"\n[{i}/{total}] Processing...")
-            status = run_god(prod, progress, log_fh)
+            status = run_god(prod, progress, log_fh, phase=phase)
             if status == 'ok':     ok   += 1
             elif status == 'skip': skip += 1
             else:                  fail += 1
