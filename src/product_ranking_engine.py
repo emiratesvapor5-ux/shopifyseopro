@@ -39,24 +39,33 @@ INDEXNOW_ENDPOINTS = [
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _api_get(path, params=None):
-    for attempt in range(4):
-        r = requests.get(f"{SHOPIFY_BASE}/{path}", headers=SHG, params=params, timeout=20)
+def _shopify_retry(fn, *args, **kwargs):
+    """Run fn(*args, **kwargs), retrying up to 6× on Shopify 429 with backoff."""
+    for attempt in range(6):
+        r = fn(*args, **kwargs)
         if r.status_code == 429:
-            wait = int(float(r.headers.get('Retry-After', '10'))) + 1
-            print(f"  Shopify 429 — retrying in {wait}s (attempt {attempt+1}/4)...")
-            time.sleep(min(wait, 30))
+            wait = int(float(r.headers.get('Retry-After', '15'))) + 2
+            wait = min(wait, 45)
+            print(f"  Shopify 429 — retrying in {wait}s (attempt {attempt+1}/6)...")
+            time.sleep(wait)
             continue
-        r.raise_for_status()
-        return r.json()
+        return r
+    return r  # return last response; caller handles non-429 errors
+
+def _api_get(path, params=None):
+    r = _shopify_retry(requests.get, f"{SHOPIFY_BASE}/{path}",
+                       headers=SHG, params=params, timeout=20)
     r.raise_for_status()
+    return r.json()
 
 def _api_put(path, data):
-    r = requests.put(f"{SHOPIFY_BASE}/{path}", headers=SH, json=data, timeout=25)
+    r = _shopify_retry(requests.put, f"{SHOPIFY_BASE}/{path}",
+                       headers=SH, json=data, timeout=25)
     return r.status_code, r.json()
 
 def _api_post(path, data):
-    r = requests.post(f"{SHOPIFY_BASE}/{path}", headers=SH, json=data, timeout=25)
+    r = _shopify_retry(requests.post, f"{SHOPIFY_BASE}/{path}",
+                       headers=SH, json=data, timeout=25)
     return r.status_code, r.json()
 
 def slugify(text):
