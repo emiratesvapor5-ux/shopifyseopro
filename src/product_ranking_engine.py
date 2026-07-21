@@ -39,6 +39,16 @@ INDEXNOW_ENDPOINTS = [
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+_api_last_t = [0.0]
+
+def _api_throttle():
+    """Ensure ≤1 Shopify API call/sec per process (2 parallel chunks = 2/sec, under Shopify's limit)."""
+    import time as _t
+    gap = 1.0 - (_t.time() - _api_last_t[0])
+    if gap > 0:
+        _t.sleep(gap)
+    _api_last_t[0] = _t.time()
+
 def _shopify_retry(fn, *args, **kwargs):
     """Run fn(*args, **kwargs), retrying up to 6× on Shopify 429 with backoff."""
     for attempt in range(6):
@@ -53,17 +63,20 @@ def _shopify_retry(fn, *args, **kwargs):
     return r  # return last response; caller handles non-429 errors
 
 def _api_get(path, params=None):
+    _api_throttle()
     r = _shopify_retry(requests.get, f"{SHOPIFY_BASE}/{path}",
                        headers=SHG, params=params, timeout=20)
     r.raise_for_status()
     return r.json()
 
 def _api_put(path, data):
+    _api_throttle()
     r = _shopify_retry(requests.put, f"{SHOPIFY_BASE}/{path}",
                        headers=SH, json=data, timeout=25)
     return r.status_code, r.json()
 
 def _api_post(path, data):
+    _api_throttle()
     r = _shopify_retry(requests.post, f"{SHOPIFY_BASE}/{path}",
                        headers=SH, json=data, timeout=25)
     return r.status_code, r.json()
