@@ -260,14 +260,14 @@ def run_god(prod, progress, log_fh):
     log_fh.flush()
 
     god_py = os.path.join(os.path.dirname(__file__), 'god_seo_engine.py')
-    cmd = [sys.executable, '-u', god_py, url, '--no-ai', '--no-backlinks', '--fast']
+    cmd = [sys.executable, '-u', god_py, url, '--no-backlinks', '--fast']
 
     try:
         result = subprocess.run(
             cmd,
             capture_output=False,
             text=True,
-            timeout=300,
+            timeout=480,  # 8 min: AI content (Pollinations) adds ~90s vs template
             cwd=os.path.join(os.path.dirname(__file__), '..'),
         )
         if result.returncode == 0:
@@ -385,3 +385,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
