@@ -10,7 +10,8 @@ SHOP    = 'emirates-vapor.myshopify.com'
 TOKEN   = os.environ.get('SHOPIFY_TOKEN', '')
 DOMAIN  = 'https://emiratesvapor.ae'
 REPORTS = os.path.join(os.path.dirname(__file__), '..', 'rank_reports')
-PROGRESS_FILE = os.path.join(REPORTS, 'batch_progress.json')
+PROGRESS_FILE    = os.path.join(REPORTS, 'batch_progress.json')
+P2_PROGRESS_FILE = os.path.join(REPORTS, 'batch_progress_p2.json')
 
 # Products already GOD-SEO'd (Shopify product IDs from pre-batch manual runs)
 DONE_IDS = {8242398986314, 8242439422026, 8242493915210, 8247941988426, 8247942152266, 8247941890122}
@@ -206,14 +207,18 @@ DONE_HANDLES = {
     "geekvape-legend-5-kit-uae",
 }
 
-def load_progress():
-    if os.path.exists(PROGRESS_FILE):
-        return json.load(open(PROGRESS_FILE))
+def load_progress(path=None):
+    f = path or PROGRESS_FILE
+    if os.path.exists(f):
+        try:
+            return json.load(open(f))
+        except Exception:
+            pass
     return {"done": [], "failed": [], "skipped": []}
 
-def save_progress(p):
+def save_progress(p, path=None):
     os.makedirs(REPORTS, exist_ok=True)
-    json.dump(p, open(PROGRESS_FILE, 'w'), indent=2)
+    json.dump(p, open(path or PROGRESS_FILE, 'w'), indent=2)
 
 def get_all_products(vendor_filter=None):
     """Fetch all active products using correct Shopify cursor pagination."""
@@ -244,7 +249,7 @@ def get_all_products(vendor_filter=None):
 
     return remaining
 
-def run_god(prod, progress, log_fh, phase=1):
+def run_god(prod, progress, log_fh, phase=1, progress_file=None):
     handle = prod['handle']
     url    = f"{DOMAIN}/products/{handle}"
 
@@ -265,7 +270,7 @@ def run_god(prod, progress, log_fh, phase=1):
         cmd = [sys.executable, '-u', god_py, url, '--no-blueprint', '--no-backlinks']
     else:
         # Phase 1: template-only fast pass — get all products covered quickly
-        cmd = [sys.executable, '-u', god_py, url, '--no-ai', '--no-backlinks', '--fast']
+        cmd = [sys.executable, '-u', god_py, url, '--no-ai', '--no-backlinks', '--fast', '--no-verify']
 
     try:
         result = subprocess.run(
@@ -277,26 +282,26 @@ def run_god(prod, progress, log_fh, phase=1):
         )
         if result.returncode == 0:
             progress['done'].append(handle)
-            save_progress(progress)
+            save_progress(progress, progress_file)
             log_fh.write(f"✓ SUCCESS\n")
             log_fh.flush()
             return 'ok'
         else:
             progress['failed'].append({'handle': handle, 'code': result.returncode})
-            save_progress(progress)
+            save_progress(progress, progress_file)
             log_fh.write(f"✗ EXIT {result.returncode}\n")
             log_fh.flush()
             return 'fail'
     except subprocess.TimeoutExpired:
         progress['failed'].append({'handle': handle, 'code': 'timeout'})
-        save_progress(progress)
+        save_progress(progress, progress_file)
         log_fh.write(f"✗ TIMEOUT\n")
         log_fh.flush()
-        print(f"  ✗ Timeout after 5 min — skipping")
+        print(f"  ✗ Timeout — skipping")
         return 'timeout'
     except Exception as e:
         progress['failed'].append({'handle': handle, 'code': str(e)})
-        save_progress(progress)
+        save_progress(progress, progress_file)
         log_fh.write(f"✗ ERROR: {e}\n")
         log_fh.flush()
         print(f"  ✗ Error: {e}")
@@ -304,7 +309,8 @@ def run_god(prod, progress, log_fh, phase=1):
 
 def main():
     args = sys.argv[1:]
-    resume = '--resume' in args
+    resume     = '--resume' in args
+    auto_phase = '--auto-phase' in args
     vendor_filter = None
     chunk = None
     limit = None
@@ -328,12 +334,9 @@ def main():
         TOKEN = env_token
 
     print("⚡ BATCH GOD SEO ENGINE")
-    mode_label = "Phase 2 — Keyword Mining + AI" if phase == 2 else "Phase 1 — Fast Coverage"
-    print(f"  Mode: {mode_label}  |  Resume: {resume}  |  Vendor: {vendor_filter or 'ALL'}  |  Chunk: {chunk or 'ALL'}")
     print("  Fetching products...")
 
     prods = get_all_products(vendor_filter)
-    progress = load_progress() if resume else {"done": [], "failed": [], "skipped": []}
 
     # Sort: named brands first, Emirates Vapor (juices/own brand) last
     PRIORITY = ['GeekVape','Elfbar','NASTY','AL FAKHER','Aspire','FUMMO','Uwell',
@@ -358,11 +361,42 @@ def main():
         prods = prods[:limit]
         print(f"  LIMIT MODE: running only first {limit} product(s)")
 
-    # Skip already-done handles if resuming
-    if resume:
-        done_set = set(progress['done'])
-        prods = [p for p in prods if p['handle'] not in done_set]
-        print(f"  Resuming — {len(done_set)} already done, {len(prods)} remaining")
+    # ── Auto-phase: detect whether Phase 1 is done for this chunk, then switch ──
+    progress_file = PROGRESS_FILE
+    if auto_phase:
+        p1_prog  = load_progress(PROGRESS_FILE)
+        p1_done  = set(p1_prog.get('done', []))
+        # Phase 1 is complete when every product in this chunk is already done
+        chunk_handles = {p['handle'] for p in prods}
+        p1_complete = chunk_handles and chunk_handles.issubset(p1_done)
+
+        if p1_complete:
+            phase = 2
+            progress_file = P2_PROGRESS_FILE
+            p2_prog = load_progress(P2_PROGRESS_FILE)
+            p2_done = set(p2_prog.get('done', []))
+            progress = p2_prog
+            # Only process products not yet in Phase 2
+            prods = [p for p in prods if p['handle'] not in p2_done]
+            print(f"  AUTO-PHASE → Phase 2 (keyword mining + AI)")
+            print(f"  Phase 1 complete ✅  |  Phase 2 remaining: {len(prods)}")
+        else:
+            phase = 1
+            progress_file = PROGRESS_FILE
+            progress = p1_prog
+            p1_remaining = [p for p in prods if p['handle'] not in p1_done]
+            prods = p1_remaining
+            print(f"  AUTO-PHASE → Phase 1 (fast coverage)")
+            print(f"  Phase 1 done: {len(p1_done)}  |  Remaining: {len(prods)}")
+    else:
+        progress = load_progress(PROGRESS_FILE) if resume else {"done": [], "failed": [], "skipped": []}
+        if resume:
+            done_set = set(progress['done'])
+            prods = [p for p in prods if p['handle'] not in done_set]
+            print(f"  Resuming — {len(done_set)} already done, {len(prods)} remaining")
+
+    mode_label = "Phase 2 — Keyword Mining + AI" if phase == 2 else "Phase 1 — Fast Coverage"
+    print(f"  Mode: {mode_label}  |  Vendor: {vendor_filter or 'ALL'}  |  Chunk: {chunk or 'ALL'}")
 
     total = len(prods)
     print(f"  Total to process: {total} products")
@@ -377,7 +411,7 @@ def main():
 
         for i, prod in enumerate(prods, 1):
             print(f"\n[{i}/{total}] Processing...")
-            status = run_god(prod, progress, log_fh, phase=phase)
+            status = run_god(prod, progress, log_fh, phase=phase, progress_file=progress_file)
             if status == 'ok':     ok   += 1
             elif status == 'skip': skip += 1
             else:                  fail += 1
