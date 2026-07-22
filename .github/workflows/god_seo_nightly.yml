@@ -2,9 +2,9 @@ name: GOD SEO Nightly Batch (12AM-8AM UAE)
 
 on:
   schedule:
-    # 12:00 AM UAE (UTC+4) = 20:00 UTC
+    # 12:00 AM UAE (UTC+4) = 20:00 UTC — main nightly run
     - cron: '0 20 * * *'
-    # 04:00 AM UAE (UTC+4) = 00:00 UTC — second pass for any failures
+    # 04:00 AM UAE (UTC+4) = 00:00 UTC — cleanup / phase-2 pass
     - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
@@ -14,13 +14,13 @@ on:
         default: "all-chunks"
         type: choice
         options:
-          - "all-chunks"
-          - "test-1"
+          - "all-chunks"    # Run all 6 chunks (nightly, auto-phase)
+          - "test-1"        # Test: 1 product only
 
 jobs:
   god-seo:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 360  # 6hr ceiling — Phase 2 can take up to 9 min/product
 
     strategy:
       max-parallel: 2
@@ -43,7 +43,7 @@ jobs:
       - name: Install dependencies
         run: pip install -q requests
 
-      - name: Restore progress cache
+      - name: Restore Phase 1 progress cache
         uses: actions/cache@v4
         with:
           path: rank_reports/batch_progress.json
@@ -51,32 +51,46 @@ jobs:
           restore-keys: |
             batch-progress-chunk-${{ matrix.chunk }}-
 
-      - name: Create rank_reports directory
-        run: mkdir -p rank_reports
+      - name: Restore Phase 2 progress cache
+        uses: actions/cache@v4
+        with:
+          path: rank_reports/batch_progress_p2.json
+          key: p2-progress-chunk-${{ matrix.chunk }}-${{ github.run_number }}
+          restore-keys: |
+            p2-progress-chunk-${{ matrix.chunk }}-
 
-      - name: Run GOD SEO chunk
+      - name: Create rank_reports directory
+        run: mkdir -p rank_reports src
+
+      - name: Run GOD SEO chunk (auto-phase)
         run: |
-          MODE="${{ github.event.inputs.mode }}"
-          if [ "$MODE" = "test-1" ] && [ "${{ matrix.chunk }}" != "1" ]; then
-            echo "Test mode: skipping chunk-${{ matrix.chunk }}"
+          if [ "${{ github.event.inputs.mode }}" = "test-1" ] && [ "${{ matrix.chunk }}" != "1" ]; then
+            echo "Test mode: only chunk-1 runs, skipping chunk-${{ matrix.chunk }}"
             exit 0
           fi
-          if [ "$MODE" = "test-1" ]; then
+          if [ "${{ github.event.inputs.mode }}" = "test-1" ]; then
             python3 -u src/batch_god_seo.py --limit 1
           else
-            python3 -u src/batch_god_seo.py --resume --chunk ${{ matrix.chunk }}
+            python3 -u src/batch_god_seo.py --chunk ${{ matrix.chunk }} --auto-phase
           fi
         env:
           PYTHONUNBUFFERED: "1"
 
-      - name: Save progress cache
+      - name: Save Phase 1 progress cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: rank_reports/batch_progress.json
           key: batch-progress-chunk-${{ matrix.chunk }}-${{ github.run_number }}
 
-      - name: Upload logs
+      - name: Save Phase 2 progress cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: rank_reports/batch_progress_p2.json
+          key: p2-progress-chunk-${{ matrix.chunk }}-${{ github.run_number }}
+
+      - name: Upload logs and progress
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -84,5 +98,5 @@ jobs:
           path: |
             rank_reports/batch_god_run.log
             rank_reports/batch_progress.json
+            rank_reports/batch_progress_p2.json
           retention-days: 7
-
