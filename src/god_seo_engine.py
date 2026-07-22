@@ -877,7 +877,7 @@ def clean_product_url(prod, focus):
 
 
 def god_rank(url, dry=False, use_ai=True, ping=True, backlinks=True, package=None,
-            focus_override=None, clean_url=False, fast=False, no_blueprint=False):
+            focus_override=None, clean_url=False, fast=False, no_blueprint=False, no_verify=False):
     os.makedirs(REPORTS, exist_ok=True)
     t0 = time.time()
     print("=" * 65)
@@ -982,14 +982,14 @@ def god_rank(url, dry=False, use_ai=True, ping=True, backlinks=True, package=Non
                 all_urls.append(f"https://{prod['domain']}/{kind}/{h}")
         all_urls = list(dict.fromkeys(all_urls))
 
-        if ping:
+        if ping and not no_verify:
             q.index_everything(all_urls)
         if backlinks:
             anchors = ([focus.title()] + [s.title() for s in secondary[:4]]
                        + [f"Buy {prod['name']} UAE", f"{prod['brand']} vape Dubai",
                           f"{prod['name']} price UAE"])
             bl_log = launch_backlinks(all_urls, anchors, prod["handle"])
-        checks = verify_live(prod, gen, [u for u in all_urls if u != prod["url"]][:6])
+        checks = verify_live(prod, gen, [u for u in all_urls if u != prod["url"]][:6]) if not no_verify else []
     else:
         print("\n[G4-G8] " + ("DRY RUN — no writes/pings/backlinks."
                               if dry else "Non-Shopify URL — package written to report."))
@@ -1045,7 +1045,8 @@ def main():
              focus_override=focus_override,
              clean_url="--clean-url" in args,
              fast="--fast" in args,
-             no_blueprint="--no-blueprint" in args)
+             no_blueprint="--no-blueprint" in args,
+             no_verify="--no-verify" in args)
 
 
 if __name__ == "__main__":
