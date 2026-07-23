@@ -1210,8 +1210,19 @@ def build_schema_scripts(prod, gen, focus):
                 {"@type": "OpeningHoursSpecification", "dayOfWeek": spec}
                 for spec in STORE_ENTITY["opening_hours"]]
         schemas.append(business)
-    return "\n".join(f'<script type="application/ld+json">{json.dumps(x, ensure_ascii=False)}</script>'
-                     for x in schemas)
+    scripts = "\n".join(f'<script type="application/ld+json">{json.dumps(x, ensure_ascii=False)}</script>'
+                        for x in schemas)
+    # Patch dateModified in the Product schema to always show today's date when page loads
+    scripts += (
+        '\n<script>'
+        'document.querySelectorAll(\'script[type="application/ld+json"]\').forEach(function(el){'
+        'try{var d=JSON.parse(el.textContent);'
+        'if(d["@type"]==="Product"){d.dateModified=new Date().toISOString().split("T")[0];'
+        'el.textContent=JSON.stringify(d);}}'
+        'catch(e){}});'
+        '</script>'
+    )
+    return scripts
 
 
 def faq_details_html(faq_pairs):
@@ -1380,12 +1391,12 @@ def render_body(gen, prod, schema_html, focus=""):
                   f'<a href="https://vaporshopdubai.ae" {_LINK} rel="noopener" '
                   f'target="_blank">VaporShop Dubai</a>'])) + "</div>")
 
-    import datetime as _dt2
-    _today_str = _dt2.date.today().strftime("%-d %B %Y")
     lastmod_bar = (
-        f'<p style="font-size:12px;color:#888;margin:8px 0 0;border-top:1px solid #f0f0f0;'
-        f'padding-top:8px;">✏️ <em>Product information last reviewed and updated: '
-        f'<strong>{_today_str}</strong> — Emirates Vapor UAE</em></p>'
+        '<p style="font-size:12px;color:#888;margin:8px 0 0;border-top:1px solid #f0f0f0;'
+        'padding-top:8px;">✏️ <em>Product information last reviewed and updated: '
+        '<strong><span id="ev-lastmod-date"></span></strong> — Emirates Vapor UAE</em></p>'
+        '<script>document.getElementById("ev-lastmod-date").textContent='
+        'new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"});</script>'
     )
 
     return (f"{QS}\n<div class=\"qseo-content\">\n{badge_grid}\n{intro}\n{pre_html}\n"
