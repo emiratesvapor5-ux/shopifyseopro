@@ -351,7 +351,7 @@ def main():
 
     # Chunk: 6 chunks of ~167 each covers all ~1000 products in one pass
     if chunk:
-        chunk_size = 167
+        chunk_size = 60
         start = (chunk - 1) * chunk_size
         end   = start + chunk_size
         prods = prods[start:end]
