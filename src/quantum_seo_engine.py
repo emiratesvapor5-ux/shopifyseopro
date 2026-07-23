@@ -1065,6 +1065,7 @@ STORE_ENTITY = {
 def build_schema_scripts(prod, gen, focus):
     import datetime as _dt
     url, name, brand, price = prod["url"], gen["product_title"], prod["brand"], prod["price_aed"]
+    today_iso = _dt.date.today().isoformat()
     price_valid_until = (_dt.date.today() + _dt.timedelta(days=90)).isoformat()
     rating, review_count = _product_rating(name)
 
@@ -1135,6 +1136,8 @@ def build_schema_scripts(prod, gen, focus):
         "sku": sku_base,
         "mpn": sku_base,
         "url": url,
+        "dateModified": today_iso,
+        "datePublished": today_iso,
         "image": img_urls if img_urls else [url],
         "offers": offers,
         "aggregateRating": {
@@ -1377,8 +1380,16 @@ def render_body(gen, prod, schema_html, focus=""):
                   f'<a href="https://vaporshopdubai.ae" {_LINK} rel="noopener" '
                   f'target="_blank">VaporShop Dubai</a>'])) + "</div>")
 
+    import datetime as _dt2
+    _today_str = _dt2.date.today().strftime("%-d %B %Y")
+    lastmod_bar = (
+        f'<p style="font-size:12px;color:#888;margin:8px 0 0;border-top:1px solid #f0f0f0;'
+        f'padding-top:8px;">✏️ <em>Product information last reviewed and updated: '
+        f'<strong>{_today_str}</strong> — Emirates Vapor UAE</em></p>'
+    )
+
     return (f"{QS}\n<div class=\"qseo-content\">\n{badge_grid}\n{intro}\n{pre_html}\n"
-            f"{spec_acc}\n" + "\n".join(accs) + f"\n{faq_acc}\n{browse}\n</div>\n"
+            f"{spec_acc}\n" + "\n".join(accs) + f"\n{faq_acc}\n{browse}\n{lastmod_bar}\n</div>\n"
             f"{schema_html}\n{QE}")
 
 
