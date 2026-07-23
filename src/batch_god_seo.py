@@ -221,25 +221,27 @@ def save_progress(p, path=None):
     json.dump(p, open(path or PROGRESS_FILE, 'w'), indent=2)
 
 def get_all_products(vendor_filter=None):
-    """Fetch all active products using correct Shopify cursor pagination."""
-    prods, pi = [], None
-    while True:
-        if pi:
-            # Cursor page: ONLY pass limit + page_info (Shopify ignores other params)
+    """Load products from cache file (committed to repo) — avoids slow API pagination on every run."""
+    cache = os.path.join(os.path.dirname(__file__), '..', 'rank_reports', 'all_products_cache.json')
+    if os.path.exists(cache):
+        prods = json.load(open(cache))
+        prods = [p for p in prods if p.get('status') == 'active']
+        print(f"  Loaded {len(prods)} products from cache file (instant)")
+    else:
+        # Fallback: fetch via since_id pagination (slower but correct)
+        print("  Cache miss — fetching from Shopify API via since_id...")
+        prods, last_id = [], 0
+        while True:
             r = requests.get(f'https://{SHOP}/admin/api/2024-01/products.json',
-                params={'limit': 250, 'page_info': pi},
+                params={'limit': 250, 'since_id': last_id,
+                        'fields': 'id,handle,title,vendor,product_type,status', 'status': 'active'},
                 headers={'X-Shopify-Access-Token': TOKEN}, timeout=60)
-        else:
-            r = requests.get(f'https://{SHOP}/admin/api/2024-01/products.json',
-                params={'limit': 250, 'fields': 'id,handle,title,vendor,product_type,status',
-                        'status': 'active'},
-                headers={'X-Shopify-Access-Token': TOKEN}, timeout=60)
-        batch = r.json().get('products', [])
-        prods.extend(batch)
-        m = re.search(r'page_info=([^&>]+).*?rel="next"', r.headers.get('Link', ''))
-        pi = m.group(1) if m else None
-        if not pi or not batch:
-            break
+            batch = r.json().get('products', [])
+            if not batch:
+                break
+            prods.extend(batch)
+            last_id = batch[-1]['id']
+        print(f"  Fetched {len(prods)} products from API")
 
     # Filter out already done
     remaining = [p for p in prods if p['id'] not in DONE_IDS and p['handle'] not in DONE_HANDLES]
