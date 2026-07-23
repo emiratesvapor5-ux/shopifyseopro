@@ -886,7 +886,7 @@ def generate_template(prod, focus, secondary):
             f"{name} at AED {price} — 100% authentic {brand}, ESMA-certified. "
             + (f"{len(variants)} {vlabel.lower()} in stock. " if variants else "")
             + "Same-day 1–3 hour Dubai delivery, cash on delivery across all 7 Emirates.", 300),
-        "seo_title": trim(f"Buy {name} UAE | AED {price} | Same-Day Dubai | Emirates Vapor", 60),
+        "seo_title": trim(f"Buy {name} UAE | AED {price} | Emirates Vapor", 60),
         "meta_description": trim(
             f"Buy {name} in UAE for AED {price}. "
             + (f"{len(variants)} {vlabel.lower()} in stock. " if variants else "")
@@ -900,13 +900,17 @@ def normalize_gen(gen, prod, focus):
     gen["seo_title"] = trim(gen.get("seo_title"), 60) or trim(
         f"Buy {focus.title()} | AED {prod['price_aed']} | Emirates Vapor", 60)
     if STORE_NAME.lower() not in gen["seo_title"].lower():
-        # theme appends "– Emirates Vapor" to page_title — keep total under ~60,
-        # cutting at a separator so no dangling fragment ("... | Ice")
+        # theme appends "– Emirates Vapor" (~17ch) to page_title — keep total under ~67ch
+        # 50ch + 17ch = 67ch total (Google shows up to ~65-70 before truncating in SERPs)
+        # Must be 50 not 44 so "UAE" survives even on long product names like "AL FAKHER Crown Bar Supermax 6000 Puff'S"
         t = gen["seo_title"]
-        if len(t) > 44:
-            cut = t[:44]
+        if len(t) > 50:
+            cut = t[:50]
             best = max(cut.rfind(" | "), cut.rfind(" – "), cut.rfind(" - "))
-            gen["seo_title"] = cut[:best].strip() if best >= 15 else trim(t, 44)
+            gen["seo_title"] = cut[:best].strip() if best >= 15 else trim(t, 50)
+        # Ensure "UAE" is always present — critical for geo-targeting
+        if "uae" not in gen["seo_title"].lower():
+            gen["seo_title"] = trim(gen["seo_title"] + " UAE", 50)
     gen["meta_description"] = trim(gen.get("meta_description"), 158)
     gen["product_title"] = trim(gen.get("product_title") or f"{prod['name']} UAE", 90)
     gen["short_description"] = trim(
