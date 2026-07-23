@@ -14,19 +14,19 @@ on:
         default: "all-chunks"
         type: choice
         options:
-          - "all-chunks"    # Run all 6 chunks (nightly, auto-phase)
+          - "all-chunks"    # Run all 15 chunks (nightly, auto-phase)
           - "test-1"        # Test: 1 product only
 
 jobs:
   god-seo:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6hr ceiling — Phase 2 can take up to 9 min/product
+    timeout-minutes: 180  # 3hr ceiling — 60 products × ~2min each
 
     strategy:
-      max-parallel: 2
+      max-parallel: 5
       fail-fast: false
       matrix:
-        chunk: [1, 2, 3, 4, 5, 6]
+        chunk: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
     env:
       SHOPIFY_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
