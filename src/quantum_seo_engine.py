@@ -613,10 +613,27 @@ def extract_real_specs(prod):
 
 def detect_product_type(prod):
     blob = f"{prod['name']} {prod.get('type', '')} {prod.get('tags', '')}".lower()
+    # Accessories / consumables — check FIRST (coils are also sold in "pod" context)
+    if any(x in blob for x in ("replacement coil", "coils", " coil ", "mesh coil",
+                               "coil pack", "coil head")):
+        return "coil"
+    if any(x in blob for x in ("e-liquid", "eliquid", "e liquid", "salt nic", "saltnic",
+                               "freebase", "60ml", "30ml", "100ml", "120ml", "e-juice",
+                               "ejuice", "vape juice", "nicotine salt")):
+        return "eliquid"
+    if any(x in blob for x in ("replacement pod", "empty pod", "pod cartridge",
+                               "refill pod", "pod pack", "pods pack")):
+        return "pod_accessory"
+    if any(x in blob for x in ("18650", "battery", "batteries", "vape battery")):
+        return "battery"
+    if any(x in blob for x in ("cotton", "wick", "wire", "tank", "atomizer", "drip tip",
+                               "glass tube", "accessory", "accessories", "case", "charger")):
+        return "accessory"
+    # Devices
     if any(x in blob for x in ("pod system", "pod kit", "pod vape kit", "starter kit",
                                "refillable", "pod-system", "pod-kit", "vape-kit")):
         return "pod"
-    if any(x in blob for x in ("box mod", " mod ", "advanced mod")):
+    if any(x in blob for x in ("box mod", " mod ", "advanced mod", "vape mod")):
         return "mod"
     return "disposable"
 
@@ -715,6 +732,65 @@ def generate_template(prod, focus, secondary):
                 "ESMA compliant — legal to purchase and use in UAE"]
         cons = ["Requires separate tank/coil and e-liquid purchases",
                 "Better suited to experienced vapers than complete beginners"]
+    elif ptype == "coil":
+        compat = specs.get("Compatibility") or specs.get("Compatible") or f"{brand} devices"
+        intro = (f"<p>The <strong>{name}</strong> is a replacement coil pack from {brand_link} — "
+                 f"compatible with {compat}. Replacing your coil regularly (typically every "
+                 f"1–2 weeks) restores full flavor and prevents burnt hits.</p>")
+        features = [
+            ("When to Replace Your Coil",
+             f"Replace the {name} when you notice a burnt or muted taste, reduced vapor, or a "
+             f"gurgling sound. Regular replacement every 1–2 weeks maintains peak performance and "
+             f"protects your device from e-liquid residue buildup."),
+            ("Genuine {brand} Quality".format(brand=brand),
+             f"Counterfeit coils use lower-grade wire that burns faster and may release harmful "
+             f"compounds. The {name} uses authentic {brand} mesh/coil materials — the same spec "
+             f"as the device's original equipment."),
+        ]
+        pros = [f"OEM-grade {brand} coil — guaranteed fit and performance",
+                f"ESMA compliant — safe to use in UAE",
+                f"Restores original flavor of your {brand} device",
+                f"100% Authentic — sourced from authorized UAE distributor"]
+        cons = ["Coils must be primed with e-liquid before first use to avoid dry hits",
+                f"Only compatible with specific {brand} devices — check compatibility before buying"]
+    elif ptype == "eliquid":
+        nic = specs.get("Nicotine") or specs.get("Strength") or "available in multiple strengths"
+        size = specs.get("Size") or specs.get("Volume") or ""
+        intro = (f"<p><strong>{name}</strong> is a premium e-liquid from {brand_link} — "
+                 f"crafted for use in refillable pod systems and open vape devices. "
+                 + (f"Available in {size}, " if size else "")
+                 + f"nicotine strength {nic}, compatible with any refillable vape device.</p>")
+        features = [
+            ("Salt Nic vs Freebase — Which Suits You?",
+             f"Salt nicotine e-liquids like {name} deliver nicotine faster and more smoothly "
+             f"than traditional freebase, making them ideal for smokers switching to vaping. "
+             f"Freebase e-liquids suit sub-ohm vapers who prefer bigger clouds and lower nicotine."),
+            ("Storage and Shelf Life",
+             f"Store {name} away from direct sunlight in a cool, dry place. Properly stored, "
+             f"e-liquid remains usable for up to 2 years. Shake before use if the liquid has settled."),
+        ]
+        pros = [f"100% Authentic {brand} — sourced from authorized UAE distributor",
+                "ESMA compliant — legally available in UAE",
+                "Works with any refillable pod or open system device",
+                "Consistent formula — same flavor profile in every bottle"]
+        cons = ["Requires a compatible refillable device — not a standalone product",
+                "Nicotine-containing product — not for use by non-smokers or minors"]
+    elif ptype in ("pod_accessory", "battery", "accessory"):
+        category = {"pod_accessory": "replacement pod", "battery": "vape battery",
+                    "accessory": "vape accessory"}[ptype]
+        intro = (f"<p>The <strong>{name}</strong> is a {category} from {brand_link} — "
+                 f"an essential component for maintaining your vape setup, available in "
+                 f"the UAE with same-day Dubai delivery and cash on delivery.</p>")
+        features = [
+            (f"Compatible {category.title()} for {brand} Devices",
+             f"The {name} is designed specifically for {brand} devices, ensuring a perfect fit "
+             f"and reliable performance. Using genuine {brand} accessories prevents compatibility "
+             f"issues and protects your device warranty.")]
+        pros = [f"100% Authentic {brand} — guaranteed fit for compatible devices",
+                "ESMA compliant — legal to purchase in UAE",
+                "Same-day Dubai delivery — get it when you need it"]
+        cons = ["Check device compatibility before purchase",
+                "Genuine accessories only — avoid counterfeit alternatives"]
     else:  # disposable
         cap_line = f"delivering {specs['Puff Count']} of" if specs.get("Puff Count") else "delivering"
         intro = (f"<p>The <strong>{name}</strong> is a disposable vape from {brand_link} — "
@@ -782,6 +858,44 @@ def generate_template(prod, focus, secondary):
              + (f", {secondary[0]}" if secondary else "") + f", the {name} is available now at "
              f'<a href="/" {ls}>{STORE_NAME}</a>. Browse the full <a href="{coll}" {ls}>'
              f"{brand} collection</a> for more options.</p>")
+
+    # Brand authority paragraph — E-E-A-T signal for AI Overview citation
+    _brand_blurb = {
+        "al fakher": (f"AL FAKHER is one of the UAE's most recognised vaping and tobacco brands, "
+                      f"founded in the UAE and distributed across 100+ countries. Known for consistent "
+                      f"quality control and ESMA-compliant manufacturing, AL FAKHER products are "
+                      f"among the top-selling vape brands in Dubai and across the GCC."),
+        "elfbar": (f"Elfbar (also written ELF BAR) is a global disposable vape brand with over "
+                   f"50 million units sold worldwide. Their products are manufactured to ISO 9001 "
+                   f"standards and are ESMA-certified for sale in the UAE."),
+        "nasty": (f"Nasty Juice is a Malaysian e-liquid brand established in 2016, now distributed "
+                  f"in 70+ countries. Their salt nic and freebase lines are ESMA-certified and among "
+                  f"the most consistently reviewed e-liquids available in the UAE."),
+        "geekvape": (f"GeekVape is a Shenzhen-based manufacturer known for rugged, waterproof devices. "
+                     f"Their Aegis series — AS-111-certified for shock, water, and dust resistance — "
+                     f"is the bestselling pod kit range in the UAE among experienced vapers."),
+        "voopoo": (f"VOOPOO is a leading Chinese vape manufacturer known for the GENE chip platform, "
+                   f"which powers their Drag and VINCI series. VOOPOO devices are ESMA-certified and "
+                   f"sold through authorised UAE distributors."),
+        "vaporesso": (f"Vaporesso is a Shenzhen-based brand and one of the world's largest vape "
+                      f"manufacturers by output. Their AXON and GTX chip series are found across "
+                      f"pod kits and mods available in the UAE under ESMA certification."),
+        "hqd": (f"HQD is a major global disposable vape manufacturer with distribution in 100+ countries. "
+                f"Their Cuvie series is one of the best-known disposable lines in the UAE market, "
+                f"available through ESMA-certified UAE distributors."),
+        "dr vapes": (f"Dr Vapes is a UK-founded e-liquid brand best known for the Panther Series — "
+                     f"fruit ice salt nics widely regarded as among the best-selling e-liquids "
+                     f"in the UAE and GCC region."),
+        "air bar": (f"Air Bar is a disposable vape brand under the Suorin umbrella, one of the "
+                    f"earliest pod system manufacturers. Their disposables are distributed across "
+                    f"the UAE under ESMA certification."),
+        "aspire": (f"Aspire has manufactured vape devices since 2013 and is credited with "
+                   f"inventing the commercial clearomizer. Their pod kits and coils remain "
+                   f"among the most reliable in the UAE market, backed by ESMA certification."),
+    }.get((brand or "").lower().strip(), None)
+
+    if _brand_blurb:
+        intro += f"<p><strong>About {brand}:</strong> {_brand_blurb}</p>"
 
     parts = [f"<h2>{fk} — The Quick Answer</h2>{intro}"]
 
