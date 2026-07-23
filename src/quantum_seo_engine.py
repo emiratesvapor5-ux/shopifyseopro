@@ -1150,21 +1150,26 @@ def build_schema_scripts(prod, gen, focus):
         "review": reviews,
     }
     faq = {"@context": "https://schema.org", "@type": "FAQPage",
+           "dateModified": today_iso, "datePublished": today_iso,
            "mainEntity": [{"@type": "Question", "name": q,
                            "acceptedAnswer": {"@type": "Answer", "text": a}}
                           for q, a in gen["faq"]]}
-    crumbs = {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
+    crumbs = {"@context": "https://schema.org", "@type": "BreadcrumbList",
+              "dateModified": today_iso,
+              "itemListElement": [
         {"@type": "ListItem", "position": 1, "name": "Home", "item": f"https://{prod['domain']}/"},
         {"@type": "ListItem", "position": 2, "name": f"{brand} Vapes Dubai",
          "item": f"https://{prod['domain']}/collections/{slugify(brand or 'vapes')}"},
         {"@type": "ListItem", "position": 3, "name": name, "item": url}]}
     website = {"@context": "https://schema.org", "@type": "WebSite", "name": STORE_NAME,
               "url": f"https://{prod['domain']}/",
+              "dateModified": today_iso,
               "potentialAction": {"@type": "SearchAction",
                   "target": f"https://{prod['domain']}/search?q={{search_term_string}}",
                   "query-input": "required name=search_term_string"}}
     org = {"@context": "https://schema.org", "@type": "Organization",
            "name": STORE_NAME, "url": f"https://{prod['domain']}/",
+           "dateModified": today_iso,
            "description": "UAE online vape retailer — 100% authentic products, ESMA-certified, "
                           "same-day delivery across Dubai and all 7 Emirates.",
            "areaServed": {"@type": "Country", "name": "UAE"}}
@@ -1212,15 +1217,23 @@ def build_schema_scripts(prod, gen, focus):
         schemas.append(business)
     scripts = "\n".join(f'<script type="application/ld+json">{json.dumps(x, ensure_ascii=False)}</script>'
                         for x in schemas)
-    # Patch dateModified in the Product schema to always show today's date when page loads
+    # Patch dateModified + datePublished with live ISO datetime on every page load.
+    # Applies to Product, FAQPage, WebSite, Organization — all schema blocks on this page.
+    # Google's crawler sees the current timestamp every visit = always "freshest" signal.
     scripts += (
-        '\n<script>'
+        '\n<script>(function(){'
+        'var iso=new Date().toISOString();'
         'document.querySelectorAll(\'script[type="application/ld+json"]\').forEach(function(el){'
-        'try{var d=JSON.parse(el.textContent);'
-        'if(d["@type"]==="Product"){d.dateModified=new Date().toISOString().split("T")[0];'
-        'el.textContent=JSON.stringify(d);}}'
+        'try{'
+        'var d=JSON.parse(el.textContent);'
+        'var types=["Product","FAQPage","WebSite","Organization","BreadcrumbList","ProductGroup"];'
+        'if(types.indexOf(d["@type"])!==-1){'
+        'd.dateModified=iso;'
+        'if(d["@type"]==="Product"||d["@type"]==="FAQPage"){d.datePublished=iso;}'
+        'el.textContent=JSON.stringify(d);'
+        '}}'
         'catch(e){}});'
-        '</script>'
+        '})();</script>'
     )
     return scripts
 
@@ -1394,9 +1407,13 @@ def render_body(gen, prod, schema_html, focus=""):
     lastmod_bar = (
         '<p style="font-size:12px;color:#888;margin:8px 0 0;border-top:1px solid #f0f0f0;'
         'padding-top:8px;">✏️ <em>Product information last reviewed and updated: '
-        '<strong><span id="ev-lastmod-date"></span></strong> — Emirates Vapor UAE</em></p>'
-        '<script>document.getElementById("ev-lastmod-date").textContent='
-        'new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"});</script>'
+        '<strong><span id="ev-lastmod-dt"></span></strong> — Emirates Vapor UAE</em></p>'
+        '<script>(function(){'
+        'var n=new Date();'
+        'var ds=n.toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"});'
+        'var ts=n.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZoneName:"short"});'
+        'document.getElementById("ev-lastmod-dt").textContent=ds+" at "+ts;'
+        '})();</script>'
     )
 
     return (f"{QS}\n<div class=\"qseo-content\">\n{badge_grid}\n{intro}\n{pre_html}\n"
