@@ -982,7 +982,9 @@ def god_rank(url, dry=False, use_ai=True, ping=True, backlinks=True, package=Non
                 all_urls.append(f"https://{prod['domain']}/{kind}/{h}")
         all_urls = list(dict.fromkeys(all_urls))
 
-        if ping and not no_verify:
+        if ping:
+            # IndexNow pings Bing/Yandex/Seznam instantly — fast HTTP only, no OOM risk
+            # no_verify only blocks verify_live() (Cloudflare-blocked on GitHub IPs)
             q.index_everything(all_urls)
         if backlinks:
             anchors = ([focus.title()] + [s.title() for s in secondary[:4]]
