@@ -1454,10 +1454,15 @@ def apply_image_alts(product_id, alts, prod):
     print(f"  {len(imgs)} images alt-tagged (keyword + variant aware) ✅")
 
 
+_collection_cache = {}  # brand → [handles] — populated once per batch, saves 4 API calls/product
+
 def find_existing_collections(brand):
-    handles = []
     if not brand:
-        return handles
+        return []
+    key = brand.lower()
+    if key in _collection_cache:
+        return _collection_cache[key]
+    handles = []
     for h in dict.fromkeys([slugify(brand), slugify(f"{brand}-vape-uae")]):
         for kind in ("custom_collections", "smart_collections"):
             try:
@@ -1466,6 +1471,7 @@ def find_existing_collections(brand):
                     break
             except Exception:
                 pass
+    _collection_cache[key] = handles
     return handles
 
 
@@ -1527,11 +1533,32 @@ def apply_short_description(product_id, prod, gen, focus):
 
 
 def apply_onpage(prod, gen, focus):
-    print("\n[6/8] Applying on-page SEO to Shopify...")
+    print("\n[6/8] Applying on-page SEO to Shopify (GraphQL fast-path)...")
     pid = prod["id"]
-    pre.step1_product_meta(pid, gen["seo_title"], gen["meta_description"], gen["product_title"])
-    apply_short_description(pid, prod, gen, focus)
-    apply_image_alts(pid, gen["image_alts"], prod)
+
+    # Build body + schema first (needed for the single GraphQL call)
+    schema_html = build_schema_scripts(prod, gen, focus)
+    body = render_body(gen, prod, schema_html, focus)
+    rich = build_rich_text_short_desc(prod, gen, focus)
+
+    ok = pre.graphql_update_product(
+        product_id   = pid,
+        title        = gen["product_title"],
+        body_html    = body,
+        seo_title    = gen["seo_title"],
+        seo_desc     = gen["meta_description"],
+        short_desc_rich = rich,
+        image_alts   = gen.get("image_alts", []),
+    )
+    if ok:
+        print(f"  ✅ GraphQL: title + body + SEO + metafields + images — 2 calls total")
+    else:
+        # Fallback to original REST path if GraphQL fails
+        print("  ⚠️  GraphQL failed — falling back to REST")
+        pre.step1_product_meta(pid, gen["seo_title"], gen["meta_description"], gen["product_title"])
+        apply_short_description(pid, prod, gen, focus)
+        apply_image_alts(pid, gen["image_alts"], prod)
+        apply_body_content(pid, gen, schema_html, prod, focus)
 
     # Zero missed info: if the content doesn't name the variants, inject the full
     # variant list with real names so no option is ever missing from the page.
@@ -1553,9 +1580,6 @@ def apply_onpage(prod, gen, focus):
     flavors_handle = None
     if len(prod["variants"]) > 1:
         flavors_handle = flavors_page_v2(prod, gen, focus)
-
-    schema_html = build_schema_scripts(prod, gen, focus)
-    apply_body_content(pid, gen, schema_html, prod, focus)
 
     collections = find_existing_collections(prod["brand"])
     hub = find_brand_hub(prod["brand"])

@@ -44,10 +44,102 @@ _api_last_t = [0.0]
 def _api_throttle():
     """Ensure ≤1 Shopify API call/sec per process (2 parallel chunks = 2/sec, under Shopify's limit)."""
     import time as _t
-    gap = 1.0 - (_t.time() - _api_last_t[0])
+    gap = 0.6 - (_t.time() - _api_last_t[0])   # 0.6s = ~1.6 calls/sec, safe under 2/sec limit
     if gap > 0:
         _t.sleep(gap)
     _api_last_t[0] = _t.time()
+
+
+GRAPHQL_URL = "https://emirates-vapor.myshopify.com/admin/api/2024-01/graphql.json"
+
+def _gql(query, variables=None):
+    """Single GraphQL call — counts as 1 throttle unit regardless of payload size."""
+    _api_throttle()
+    r = _shopify_retry(requests.post, GRAPHQL_URL,
+                       headers=SH, json={"query": query, "variables": variables or {}},
+                       timeout=30)
+    return r.json()
+
+
+def graphql_update_product(product_id, title, body_html, seo_title, seo_desc,
+                            short_desc_rich, image_alts=None):
+    """
+    Replaces ~12 REST calls with 1-2 GraphQL calls:
+      - productUpdate: title + bodyHtml + SEO title/desc + all metafields in ONE call
+      - productUpdateMedia (optional): image alt texts in ONE call
+    Returns True on success.
+    """
+    gid = f"gid://shopify/Product/{product_id}"
+
+    mutation = """
+    mutation productUpdate($input: ProductInput!) {
+      productUpdate(input: $input) {
+        product { id title }
+        userErrors { field message }
+      }
+    }"""
+
+    variables = {"input": {
+        "id": gid,
+        "title": title,
+        "bodyHtml": body_html,
+        "seo": {"title": seo_title, "description": seo_desc},
+        "metafields": [
+            {"namespace": "global",  "key": "title_tag",        "value": seo_title,       "type": "single_line_text_field"},
+            {"namespace": "global",  "key": "description_tag",  "value": seo_desc,        "type": "single_line_text_field"},
+            {"namespace": "custom",  "key": "short_description","value": short_desc_rich,  "type": "rich_text_field"},
+        ],
+    }}
+
+    d = _gql(mutation, variables)
+    errs = d.get("data", {}).get("productUpdate", {}).get("userErrors", [])
+    if errs:
+        print(f"  ⚠️  GraphQL productUpdate errors: {errs}")
+        return False
+
+    # Image alt texts — one extra call covers all images
+    if image_alts:
+        _graphql_update_image_alts(product_id, image_alts)
+
+    return True
+
+
+def _graphql_update_image_alts(product_id, alts):
+    """Fetch images + update all alts in one GraphQL query + N mutations batched."""
+    gid = f"gid://shopify/Product/{product_id}"
+    # Fetch all image IDs + current alts in one call
+    q = """query getImages($id: ID!) {
+      product(id: $id) {
+        images(first: 20) { edges { node { id altText } } }
+      }
+    }"""
+    d = _gql(q, {"id": gid})
+    imgs = [e["node"] for e in d.get("data", {}).get("product", {}).get("images", {}).get("edges", [])]
+    if not imgs:
+        return
+
+    # Build bulk mediaUpdate mutation — all images in ONE call
+    mutations = []
+    vars_map = {}
+    for i, img in enumerate(imgs):
+        alt = alts[i % len(alts)]
+        var = f"input{i}"
+        mutations.append(f"u{i}: productImageUpdate(productId: $pid, image: ${var}) {{ image {{ id }} }}")
+        vars_map[var] = {"id": img["id"], "altText": alt}
+
+    if not mutations:
+        return
+
+    var_decls = ", ".join(f"${k}: ImageInput!" for k in vars_map)
+    bulk_mutation = f"mutation updateAlts($pid: ID!, {var_decls}) {{ {' '.join(mutations)} }}"
+    _api_throttle()
+    r = _shopify_retry(requests.post, GRAPHQL_URL,
+                       headers=SH,
+                       json={"query": bulk_mutation, "variables": {"pid": gid, **vars_map}},
+                       timeout=30)
+    errs = r.json().get("errors", [])
+    if errs:
+        print(f"  ⚠️  Image alt update errors: {errs[:2]}")
 
 def _shopify_retry(fn, *args, **kwargs):
     """Run fn(*args, **kwargs), retrying up to 6× on Shopify 429 with backoff."""
